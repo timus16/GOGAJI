@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { computeChart, dms, formatOffset, rashiOf, type BirthInput, type Chart } from "~/lib/astro";
 import { PRESETS, GRAHAS, presetById } from "~/content/vedic-mapping";
 import { buildWallpaperSvg, wallpaperFilename } from "~/lib/wallpaper";
@@ -101,6 +101,9 @@ export default function Generator() {
   const [chart, setChart] = useState<Chart | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [zoneNote, setZoneNote] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   const doSearch = async () => {
     if (!query.trim()) return;
@@ -111,16 +114,35 @@ export default function Generator() {
     if (!found.length) { setError("No place found — enter latitude, longitude and timezone below and you can still continue."); setManual(true); }
   };
 
-  const pick = async (p: Place) => {
+  /**
+   * Selecting a place must be instant and must never wait on the network.
+   * The zone we can derive locally (open-meteo's answer, or a longitude guess)
+   * is applied synchronously; a nicer zone from the lookup service is only
+   * layered on afterwards, and never blocks or breaks the generate path.
+   */
+  const pick = (p: Place) => {
     setResults([]);
-    const tz = p.timezone ?? (await zoneFor(p.latitude, p.longitude)) ?? guessZone(p.longitude);
-    setPlace({ label: p.label, latitude: p.latitude, longitude: p.longitude, timezone: tz });
+    setError(null);
+    setManual(false);
+    const localZone = p.timezone ?? guessZone(p.longitude);
+    setPlace({ label: p.label, latitude: p.latitude, longitude: p.longitude, timezone: localZone });
     setQuery(p.label);
+    setZoneNote(p.timezone ? null : `Timezone estimated as ${localZone} — change it under “enter coordinates by hand” if that is wrong.`);
+    if (!p.timezone) {
+      const t = setTimeout(() => setZoneNote(`Timezone estimated as ${localZone} — change it under “enter coordinates by hand” if that is wrong.`), 4500);
+      void zoneFor(p.latitude, p.longitude).then((tz) => {
+        clearTimeout(t);
+        if (!tz || tz === localZone) return;
+        setPlace((cur) => (cur.latitude === p.latitude && cur.longitude === p.longitude ? { ...cur, timezone: tz } : cur));
+        setZoneNote(null);
+      }).catch(() => clearTimeout(t));
+    }
   };
 
-  const generate = async (e?: React.FormEvent) => {
+  const generate = (e?: React.FormEvent) => {
     e?.preventDefault();
     setError(null);
+    setNote(null);
     if (!name.trim()) { setError("Please add a name — it is printed on the wallpaper."); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) { setError("Birth date and time look incomplete."); return; }
     try {
@@ -129,16 +151,31 @@ export default function Generator() {
         place: place.label || `${place.latitude.toFixed(3)}, ${place.longitude.toFixed(3)}`,
         latitude: place.latitude, longitude: place.longitude, timezone: place.timezone,
       };
-      setChart(computeChart(input));
+      const next = computeChart(input);
+      // Draw the wallpaper right here, synchronously, so a drawing failure is
+      // reported as an error instead of leaving the preview silently empty.
+      buildWallpaperSvg({ chart: next, presetId: preset, width: PHONE.width, height: PHONE.height, fontFaceCss: previewFontFaceCss });
+      setChart(next);
+      setNote(`Wallpaper drawn for ${next.moonNakshatra.name} · pada ${next.moonPada}.`);
+      requestAnimationFrame(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
     } catch (err) {
-      setError(`Could not read that birth moment: ${String(err)}`);
+      setChart(null);
+      setError(`Could not build that wallpaper: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const svg = useMemo(() => {
-    if (!chart) return "";
-    return buildWallpaperSvg({ chart, presetId: preset, width: PHONE.width, height: PHONE.height, fontFaceCss: previewFontFaceCss });
+  const drawing = useMemo(() => {
+    if (!chart) return { svg: "", error: null as string | null };
+    try {
+      return {
+        svg: buildWallpaperSvg({ chart, presetId: preset, width: PHONE.width, height: PHONE.height, fontFaceCss: previewFontFaceCss }),
+        error: null,
+      };
+    } catch (err) {
+      return { svg: "", error: `Could not draw this style: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }, [chart, preset]);
+  const svg = drawing.svg;
 
   const download = async (which: "phone" | "desktop") => {
     if (!chart) return;
@@ -163,7 +200,7 @@ export default function Generator() {
     <section id="create" className="mx-auto w-full max-w-6xl px-5 pb-24">
       <div className="grid gap-10 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:items-start">
         {/* ---------------------------------------------------------- form */}
-        <form onSubmit={generate} className="rounded-3xl border border-amber-500/25 bg-neutral-900/70 p-6 shadow-2xl backdrop-blur">
+        <form onSubmit={generate} noValidate className="rounded-3xl border border-amber-500/25 bg-neutral-900/70 p-6 shadow-2xl backdrop-blur">
           <h2 className="font-serif text-2xl tracking-wide text-amber-200">Your birth details</h2>
           <p className="mt-1 text-xs leading-relaxed text-neutral-400">
             Nothing is stored or sent anywhere — the chart and the artwork are computed on your device.
@@ -201,7 +238,7 @@ export default function Generator() {
             <ul className="mt-2 max-h-48 overflow-auto rounded-xl border border-white/10 bg-black/50 text-sm">
               {results.map((r, i) => (
                 <li key={i}>
-                  <button type="button" onClick={() => void pick(r)}
+                  <button type="button" onClick={() => pick(r)}
                     className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-amber-400/10">
                     {r.label} <span className="text-neutral-500">{r.latitude.toFixed(2)}, {r.longitude.toFixed(2)}</span>
                   </button>
@@ -215,6 +252,7 @@ export default function Generator() {
               {place.label} · {place.latitude.toFixed(4)}, {place.longitude.toFixed(4)} · {place.timezone}
             </p>
           )}
+          {zoneNote && <p className="mt-1 text-xs text-amber-300/80">{zoneNote}</p>}
 
           <button type="button" onClick={() => setManual((m) => !m)}
             className="mt-3 text-xs text-neutral-400 underline decoration-dotted hover:text-amber-200">
@@ -228,10 +266,10 @@ export default function Generator() {
                 className="col-span-2 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-neutral-100" />
               <label className="text-xs uppercase tracking-widest text-neutral-400">Latitude</label>
               <label className="text-xs uppercase tracking-widest text-neutral-400">Longitude</label>
-              <input type="number" step="0.0001" value={place.latitude}
+              <input type="number" step="any" value={place.latitude}
                 onChange={(e) => setPlace({ ...place, latitude: Number(e.target.value) })}
                 className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-neutral-100" />
-              <input type="number" step="0.0001" value={place.longitude}
+              <input type="number" step="any" value={place.longitude}
                 onChange={(e) => setPlace({ ...place, longitude: Number(e.target.value) })}
                 className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-neutral-100" />
               <label className="col-span-2 mt-1 text-xs uppercase tracking-widest text-neutral-400">Timezone (IANA)</label>
@@ -247,6 +285,7 @@ export default function Generator() {
             Create my wallpaper
           </button>
           {error && <p className="mt-3 rounded-lg border border-red-400/30 bg-red-500/10 p-2 text-xs text-red-200">{error}</p>}
+          {!error && note && <p className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">{note}</p>}
 
           {chart && g && (
             <dl className="mt-5 space-y-1 border-t border-white/10 pt-4 text-xs text-neutral-300">
@@ -273,14 +312,16 @@ export default function Generator() {
           </div>
           <p className="mb-3 text-xs text-neutral-500">{presetById(preset).blurb}</p>
 
-          <div className="mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/10 bg-black/50 shadow-2xl [&>svg]:block [&>svg]:h-auto [&>svg]:w-full">
+          <div ref={previewRef} className="mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/10 bg-black/50 shadow-2xl [&_svg]:block [&_svg]:h-auto [&_svg]:w-full">
             {svg
-              ? <div dangerouslySetInnerHTML={{ __html: svg }} />
-              : (
-                <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-neutral-500">
-                  Enter the birth details and press <span className="mx-1 text-amber-200">Create my wallpaper</span> — the wallpaper is drawn from the chart, here, live.
-                </div>
-              )}
+              ? <div className="[&_svg]:block [&_svg]:h-auto [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+              : drawing.error
+                ? <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-red-200">{drawing.error}</div>
+                : (
+                  <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-neutral-500">
+                    Enter the birth details and press <span className="mx-1 text-amber-200">Create my wallpaper</span> — the wallpaper is drawn from the chart, here, live.
+                  </div>
+                )}
           </div>
 
           {chart && (
