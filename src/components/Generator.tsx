@@ -6,6 +6,8 @@ import {
   DESKTOP, PHONE, downloadBlob, embeddedFontFaceCss, fontDataUris,
   previewFontFaceCss, svgToPngBlob,
 } from "~/lib/exporter";
+import { generateWallpaper, type Reading } from "~/server/ai";
+import AiReading from "./AiReading";
 
 interface Place {
   label: string;
@@ -88,6 +90,14 @@ async function zoneFor(lat: number, lon: number): Promise<string | null> {
   return null;
 }
 
+/** Human label for the LLM provider badge, e.g. "Gemini" / "OpenRouter". */
+function providerName(p: string | null): string | null {
+  if (!p) return null;
+  if (p === "gemini") return "Gemini";
+  if (p === "openrouter") return "OpenRouter";
+  return p;
+}
+
 export default function Generator() {
   const [name, setName] = useState("");
   const [date, setDate] = useState("1992-08-14");
@@ -103,6 +113,13 @@ export default function Generator() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [zoneNote, setZoneNote] = useState<string | null>(null);
+  const [useAI, setUseAI] = useState(true);
+  const [aiReading, setAiReading] = useState<Reading | null>(null);
+  const [aiWallpaper, setAiWallpaper] = useState<{ dataUrl: string; mime: string; width: number; height: number } | null>(null);
+  const [aiBusy, setAiBusy] = useState<"reading" | "wallpaper" | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [view, setView] = useState<"chart" | "ai">("chart");
   const previewRef = useRef<HTMLDivElement | null>(null);
 
   const doSearch = async () => {
@@ -139,18 +156,20 @@ export default function Generator() {
     }
   };
 
-  const generate = (e?: React.FormEvent) => {
+  const generate = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setError(null);
     setNote(null);
     if (!name.trim()) { setError("Please add a name — it is printed on the wallpaper."); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{1,2}:\d{2}$/.test(time)) { setError("Birth date and time look incomplete."); return; }
+    const input: BirthInput = {
+      name, date, time,
+      place: place.label || `${place.latitude.toFixed(3)}, ${place.longitude.toFixed(3)}`,
+      latitude: place.latitude, longitude: place.longitude, timezone: place.timezone,
+    };
+    // --- deterministic path: chart + chart-accurate SVG, entirely on device.
+    // It must never wait for, or be broken by, the AI call below.
     try {
-      const input: BirthInput = {
-        name, date, time,
-        place: place.label || `${place.latitude.toFixed(3)}, ${place.longitude.toFixed(3)}`,
-        latitude: place.latitude, longitude: place.longitude, timezone: place.timezone,
-      };
       const next = computeChart(input);
       // Draw the wallpaper right here, synchronously, so a drawing failure is
       // reported as an error instead of leaving the preview silently empty.
@@ -161,6 +180,29 @@ export default function Generator() {
     } catch (err) {
       setChart(null);
       setError(`Could not build that wallpaper: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // --- AI step: its own try/catch, its own failure surface. Whatever happens
+    // here, the chart-accurate wallpaper above is already on screen.
+    if (useAI) {
+      setAiBusy("reading");
+      setAiError(null);
+      let paintingTimer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        paintingTimer = setTimeout(() => setAiBusy("wallpaper"), 3500);
+        const res = await generateWallpaper({ data: input });
+        setAiReading(res.reading ?? null);
+        setAiWallpaper(res.image ?? null);
+        setAiError(res.error ?? null);
+        if (res.image) setView("ai");
+        if (res.provider) setAiProvider(res.provider);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (paintingTimer) clearTimeout(paintingTimer);
+        setAiBusy(null);
+      }
+    } else {
+      setAiReading(null); setAiWallpaper(null); setAiError(null); setView("chart");
     }
   };
 
@@ -194,7 +236,21 @@ export default function Generator() {
     } finally { setBusy(null); }
   };
 
+  /** Saves the AI-generated art background (the model image) as a PNG. */
+  const downloadAI = async () => {
+    if (!aiWallpaper) return;
+    setBusy("ai"); setError(null);
+    try {
+      const blob = await (await fetch(aiWallpaper.dataUrl)).blob();
+      const safe = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "wallpaper";
+      downloadBlob(blob, `nakshatra-canvas-ai-${safe}-${aiWallpaper.width}x${aiWallpaper.height}.png`);
+    } catch (err) {
+      setError(`Download failed: ${String(err)}`);
+    } finally { setBusy(null); }
+  };
+
   const g = chart ? GRAHAS[chart.rulingPlanet] : null;
+  const providerLabel = providerName(aiProvider);
 
   return (
     <section id="create" className="mx-auto w-full max-w-6xl px-5 pb-24">
@@ -203,8 +259,19 @@ export default function Generator() {
         <form onSubmit={generate} noValidate className="rounded-3xl border border-amber-500/25 bg-neutral-900/70 p-6 shadow-2xl backdrop-blur">
           <h2 className="font-serif text-2xl tracking-wide text-amber-200">Your birth details</h2>
           <p className="mt-1 text-xs leading-relaxed text-neutral-400">
-            Nothing is stored or sent anywhere — the chart and the artwork are computed on your device.
+            The chart and the chart-accurate artwork are computed on your device and nothing is stored — unless you opt into the AI step.
           </p>
+
+          <div className="mt-4 rounded-xl border border-amber-500/25 bg-black/40 p-3">
+            <div className="flex items-center gap-2">
+              <input id="use-ai" type="checkbox" checked={useAI} onChange={(e) => setUseAI(e.target.checked)}
+                className="h-4 w-4 accent-amber-400" />
+              <label htmlFor="use-ai" className="text-sm text-neutral-100">AI reading &amp; premium wallpaper</label>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-neutral-500">
+              Optional. The AI step calls an external model and sends your chart facts to it. Without it everything stays on your device.
+            </p>
+          </div>
 
           <label className="mt-5 block text-xs uppercase tracking-widest text-neutral-400">Full name</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="As you would like it written"
@@ -298,6 +365,20 @@ export default function Generator() {
               <div className="flex justify-between"><dt className="text-neutral-500">Lāhiri ayanāṃśa</dt><dd>{chart.ayanamsa.toFixed(4)}°</dd></div>
             </dl>
           )}
+
+          {aiReading && (
+            <section className="mt-6 border-t border-white/10 pt-5">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <h3 className="font-serif text-lg tracking-wide text-amber-200">Your Vedic reading</h3>
+                {providerLabel && (
+                  <span className="rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-xs text-amber-200">
+                    read by {providerLabel}
+                  </span>
+                )}
+              </div>
+              <AiReading reading={aiReading} />
+            </section>
+          )}
         </form>
 
         {/* ------------------------------------------------------- preview */}
@@ -312,16 +393,48 @@ export default function Generator() {
           </div>
           <p className="mb-3 text-xs text-neutral-500">{presetById(preset).blurb}</p>
 
+          {useAI && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-neutral-500">Wallpaper</span>
+              <button type="button" onClick={() => setView("chart")}
+                className={`rounded-xl border px-3 py-1.5 text-xs tracking-wider transition ${view === "chart" ? "border-amber-300 bg-amber-300/15 text-amber-100" : "border-white/15 text-neutral-300 hover:border-white/35"}`}>
+                Chart-accurate SVG
+              </button>
+              <button type="button" onClick={() => setView("ai")} disabled={!aiWallpaper}
+                className={`rounded-xl border px-3 py-1.5 text-xs tracking-wider transition disabled:cursor-not-allowed disabled:opacity-40 ${view === "ai" ? "border-amber-300 bg-amber-300/15 text-amber-100" : "border-white/15 text-neutral-300 hover:border-white/35"}`}>
+                AI premium artwork
+              </button>
+            </div>
+          )}
+          {useAI && (
+            <p className="mb-3 text-xs text-neutral-500">
+              The chart-accurate SVG is drawn from your chart on this device; the AI premium artwork is the model&rsquo;s art background only.
+            </p>
+          )}
+
+          {aiBusy && (
+            <p className="mb-3 text-center text-xs text-amber-200">
+              {aiBusy === "reading" ? "Consulting the Jyotish…" : "Painting your premium wallpaper…"}
+            </p>
+          )}
+          {aiError && (
+            <p className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-xs text-amber-100">
+              AI step unavailable: {aiError}. The chart-accurate wallpaper above still works.
+            </p>
+          )}
+
           <div ref={previewRef} className="mx-auto w-full max-w-[380px] overflow-hidden rounded-[2rem] border border-white/10 bg-black/50 shadow-2xl [&_svg]:block [&_svg]:h-auto [&_svg]:w-full">
-            {svg
-              ? <div className="[&_svg]:block [&_svg]:h-auto [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: svg }} />
-              : drawing.error
-                ? <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-red-200">{drawing.error}</div>
-                : (
-                  <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-neutral-500">
-                    Enter the birth details and press <span className="mx-1 text-amber-200">Create my wallpaper</span> — the wallpaper is drawn from the chart, here, live.
-                  </div>
-                )}
+            {view === "ai" && aiWallpaper
+              ? <img src={aiWallpaper.dataUrl} alt="AI-generated premium wallpaper" className="block h-auto w-full" />
+              : svg
+                ? <div className="[&_svg]:block [&_svg]:h-auto [&_svg]:w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+                : drawing.error
+                  ? <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-red-200">{drawing.error}</div>
+                  : (
+                    <div className="flex aspect-[1170/2532] items-center justify-center p-8 text-center text-sm text-neutral-500">
+                      Enter the birth details and press <span className="mx-1 text-amber-200">Create my wallpaper</span> — the wallpaper is drawn from the chart, here, live.
+                    </div>
+                  )}
           </div>
 
           {chart && (
@@ -334,6 +447,12 @@ export default function Generator() {
                 className="rounded-xl border border-white/20 px-4 py-2 text-sm text-neutral-200 hover:bg-white/10 disabled:opacity-50">
                 {busy === "desktop" ? "Rendering…" : `Download desktop PNG ${DESKTOP.width}×${DESKTOP.height}`}
               </button>
+              {aiWallpaper && (
+                <button type="button" onClick={() => void downloadAI()} disabled={!!busy}
+                  className="rounded-xl border border-amber-400/50 bg-amber-400/10 px-4 py-2 text-sm text-amber-100 hover:bg-amber-400/20 disabled:opacity-50">
+                  {busy === "ai" ? "Saving…" : "Download AI wallpaper"}
+                </button>
+              )}
             </div>
           )}
         </div>
