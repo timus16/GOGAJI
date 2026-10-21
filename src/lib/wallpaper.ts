@@ -22,6 +22,39 @@ const esc = (s: string) =>
 
 const DEV = "'Noto Sans Devanagari', serif";
 
+/**
+ * Cap a font size so a text run is estimated to fit `maxWidth`. The advance is
+ * modelled as 0.70 em per glyph plus any per-character letter-spacing, which is
+ * deliberately on the generous side for the display font, so the wide header and
+ * ruling-planet / yantra-note footer lines (Rāhu and Ketu carry long notes) can
+ * never run off the frame.
+ */
+const GLYPH_EM = 0.70;
+
+const fitGlyphs = (size: number, s: string, maxWidth: number, perCharExtra = 0) => {
+  const n = Math.max(1, s.length);
+  if (n * (GLYPH_EM * size + perCharExtra) <= maxWidth) return size;
+  return Math.max(8, (maxWidth / n - perCharExtra) / GLYPH_EM);
+};
+
+/**
+ * Greedy word-wrap a run into lines that each fit `maxWidth` at `size`, using
+ * the same advance model as `fitGlyphs` (no letter-spacing). Used for the long
+ * Rahu / Ketu yantra notes in the landscape footer so a two-sentence note stays
+ * inside its column instead of running past the frame.
+ */
+const wrapToWidth = (size: number, s: string, maxWidth: number): string[] => {
+  const limit = maxWidth / (GLYPH_EM * Math.max(1, size));
+  const lines: string[] = [];
+  let cur = "";
+  for (const word of s.split(/\s+/).filter(Boolean)) {
+    const trial = cur ? cur + " " + word : word;
+    if (cur && trial.length > limit) { lines.push(cur); cur = word; } else cur = trial;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+};
+
 export interface WallpaperOptions {
   chart: Chart;
   presetId: string;
@@ -152,33 +185,41 @@ function bhupura(cx: number, cy: number, r: number, sw: number, colour: string) 
       fill="none" stroke="${colour}" stroke-width="${sw}"/>`;
 }
 
-/** North-Indian (diamond) kundli of the real whole-sign placements. */
+/** North-Indian (diamond) kundli of the real whole-sign placements.
+ *
+ *  The two full diagonals plus the inner midpoint-diamond cut the square into
+ *  twelve cells: four central rhombi and eight corner triangles. Every label is
+ *  anchored on its cell's centroid (never on a dividing line) and drawn as one
+ *  centred line — sign number in the soft tint, planet glyphs in the strong
+ *  tint — so the sign and the abbreviations can no longer stack into each other
+ *  or spill across the diagonals. */
 function kundli(ch: Chart, x: number, y: number, S: number, colour: string, soft: string, sw: number) {
-  const P = (fx: number, fy: number) => [x + fx * S, y + fy * S] as const;
+  // house index -> cell centroid, in unit-square fractions of the square.
   const houseAt: [number, number][] = [
-    [0.50, 0.26], [0.27, 0.11], [0.11, 0.27], [0.26, 0.50],
-    [0.11, 0.73], [0.27, 0.89], [0.50, 0.74], [0.73, 0.89],
-    [0.89, 0.73], [0.74, 0.50], [0.89, 0.27], [0.73, 0.11],
+    [0.500, 0.250], [0.250, 0.083], [0.083, 0.250], [0.250, 0.500],
+    [0.083, 0.750], [0.250, 0.917], [0.500, 0.750], [0.750, 0.917],
+    [0.917, 0.750], [0.750, 0.500], [0.917, 0.250], [0.750, 0.083],
   ];
   let out = `<rect x="${x}" y="${y}" width="${S}" height="${S}" fill="none" stroke="${colour}" stroke-width="${sw * 1.4}"/>
     <path d="M${x} ${y} L${x + S} ${y + S} M${x + S} ${y} L${x} ${y + S}
              M${x + S / 2} ${y} L${x + S} ${y + S / 2} L${x + S / 2} ${y + S} L${x} ${y + S / 2} Z"
       fill="none" stroke="${colour}" stroke-width="${sw}"/>`;
+  // the "whole-sign houses" caption now sits on a baseline of its own just above
+  // the square, so the footer beneath the square never competes with it.
+  out += `<text x="${x + S / 2}" y="${y - S * 0.055}" fill="${soft}" font-size="${S * 0.042}" text-anchor="middle"
+    letter-spacing="${S * 0.004}" font-family="${DEV}">LAGNA ${esc(rashiOf(ch.lagna.signIndex).name.toUpperCase())} · WHOLE-SIGN HOUSES</text>`;
   for (let h = 0; h < 12; h++) {
     const [fx, fy] = houseAt[h];
-    const [px, py] = P(fx, fy);
-    const signs = ch.houses[h].signIndex;
+    const px = x + fx * S, py = y + fy * S;
+    const sign = ch.houses[h].signIndex + 1;
     const names = ch.houses[h].planets.map((k) => GRAHAS[k].symbol).join(" ");
-    out += `<text x="${px}" y="${py - S * 0.012}" fill="${soft}" font-size="${S * 0.055}"
-      text-anchor="middle" font-family="${DEV}">${signs + 1}</text>`;
-    if (names) {
-      out += `<text x="${px}" y="${py + S * 0.058}" fill="${colour}" font-size="${S * 0.062}"
-        text-anchor="middle" font-family="${DEV}" letter-spacing="0.5">${esc(names)}</text>`;
-    }
+    // one centred line; step the size down only when a crowded house would
+    // otherwise be wider than the widest band of its triangular cell.
+    const chars = String(sign).length + (names ? names.length + 1 : 0);
+    const size = S * (chars > 10 ? 0.040 : 0.048);
+    out += `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" font-family="${DEV}"
+      font-size="${size.toFixed(1)}"><tspan fill="${soft}">${sign}</tspan>${names ? ` <tspan fill="${colour}">${esc(names)}</tspan>` : ""}</text>`;
   }
-  const [lx, ly] = P(0.5, 1.10);
-  out += `<text x="${lx}" y="${ly}" fill="${soft}" font-size="${S * 0.05}" text-anchor="middle"
-    letter-spacing="${S * 0.006}" font-family="${DEV}">LAGNA ${esc(rashiOf(ch.lagna.signIndex).name.toUpperCase())} · WHOLE-SIGN HOUSES</text>`;
   return out;
 }
 
@@ -301,10 +342,16 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
 
   /* ---- text blocks */
   const fz = (f: number) => (f * w) / 1170;
+  /* The name is the widest Latin run in the composition, so it is capped with
+     fitGlyphs against the same width budget as the header: the centred column in
+     portrait, the free text column beside the mandala in landscape. A long name
+     therefore shrinks to fit instead of running off both edges of the frame. */
+  const nameStr = upper(ch.input.name.trim() || "Your Name");
+  const nameCap = portrait ? w - 2 * pad * 1.5 : w - pad * 1.6 - w * 0.56;
   const nameText = portrait
-    ? { x: w / 2, y: pad + fz(150), size: fz(74), anchor: "middle" }
-    : { x: w * 0.56, y: h * 0.16, size: fz(64), anchor: "start" };
-  const name = esc(upper(ch.input.name.trim() || "Your Name"));
+    ? { x: w / 2, y: pad + fz(150), size: fitGlyphs(fz(74), nameStr, nameCap, ls), anchor: "middle" }
+    : { x: w * 0.56, y: h * 0.16, size: fitGlyphs(fz(64), nameStr, nameCap, ls), anchor: "start" };
+  const name = esc(nameStr);
 
   const place = `${esc(ch.input.place)}`;
   const birthLine = `${new Date(ch.utc.getTime() + ch.offsetMinutes * 60000).toISOString().slice(0, 10).split("-").reverse().join(" ")} · ${ch.input.time} · ${place}`;
@@ -312,58 +359,100 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
   let body = "";
   if (portrait) {
     const tx = w / 2;
-    let y = my + R + fz(140);
-    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(30)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls}">${esc(upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name))}</text>`;
-    y += fz(86);
-    body += `<text x="${tx}" y="${y}" fill="${c.glow}" font-size="${fz(92)}" text-anchor="middle"
+    const fwFull = w - 2 * pad * 1.5;
+    /* The centre column is a fixed stack of baselines with an explicit gap
+       after every block (gaps in fz() units, 1 fz = 1 px at the 1170 master), so
+       the header rule line, the large Devanagari nakshatra name, the pada
+       syllable (moved off the header onto a row of its own), the
+       pada/deity/symbol caption, the bīja mantra (Devanagari + roman + gloss),
+       the kundli square and its footer lines can never overprint one another.
+       The Latin lines are additionally capped by fitGlyphs against fwFull, so a
+       long name, place or yantra note stays inside the frame. */
+    const headStr = upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name);
+    const padaStr = upper("PADA SYLLABLE " + nak.syllablesRoman[ch.moonPada - 1] + " · DEITY " + nak.deityRoman + " · SYMBOL " + nak.symbol);
+    let y = my + R + fz(96);
+    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(30), headStr, fwFull, ls)}" text-anchor="middle"
+      font-family="${display}" letter-spacing="${ls}">${esc(headStr)}</text>`;
+    y += fz(114);
+    body += `<text x="${tx}" y="${y}" fill="${c.glow}" font-size="${fz(90)}" text-anchor="middle"
       font-family="${dev}">${esc(nak.devanagari)}</text>`;
-    body += `<text x="${tx + fz(150)}" y="${y - fz(58)}" fill="${soft}" font-size="${fz(58)}" text-anchor="middle"
-      font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
-    y += fz(46);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(26)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.8}">${esc(upper("PADA SYLLABLE " + nak.syllablesRoman[ch.moonPada - 1] + " · DEITY " + nak.deityRoman + " · SYMBOL " + nak.symbol))}</text>`;
     y += fz(78);
-    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(56)}" text-anchor="middle"
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(52)}" text-anchor="middle"
+      font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
+    y += fz(48);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(24), padaStr, fwFull, ls * 0.8)}" text-anchor="middle"
+      font-family="${display}" letter-spacing="${ls * 0.8}">${esc(padaStr)}</text>`;
+    y += fz(70);
+    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(52)}" text-anchor="middle"
       font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
-    y += fz(44);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(28)}" text-anchor="middle"
+    y += fz(46);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(27), g.mantra.roman, fwFull)}" text-anchor="middle"
       font-family="${dev}">${esc(g.mantra.roman)}</text>`;
-    y += fz(30);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(22)}" text-anchor="middle"
+    y += fz(32);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(21), g.mantra.gloss, fwFull)}" text-anchor="middle"
       font-family="${dev}" opacity="0.85">${esc(g.mantra.gloss)}</text>`;
-    // kundli
-    const S = Math.min(w * 0.66, h * 0.20);
-    body += kundli(ch, w / 2 - S / 2, h - pad - S - fz(96), S, rule, soft, sw);
-    body += `<text x="${tx}" y="${h - pad - fz(30)}" fill="${soft}" font-size="${fz(23)}" text-anchor="middle"
+
+    // kundli square, then a properly spaced footer. The square is bounded on
+    // both axes so it always clears the inner frame and the footer lines below.
+    const S = Math.min(w * 0.58, h * 0.166);
+    const kundliTop = y + fz(50);
+    body += kundli(ch, w / 2 - S / 2, kundliTop, S, rule, soft, sw);
+    const lagnaTail = `LAGNA ${rashiOf(ch.lagna.signIndex).name} ${dms(ch.lagna.degreeInSign)} · RULING PLANET ${g.name}`;
+    const note = upper(g.yantraNote);
+    let fy = kundliTop + S + fz(40);
+    body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fwFull, ls * 0.7)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls * 0.7}">${esc(upper(birthLine))}</text>`;
-    body += `<text x="${tx}" y="${h - pad - fz(4)}" fill="${soft}" font-size="${fz(20)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.6}" opacity="0.8">${esc(upper("LAGNA " + rashiOf(ch.lagna.signIndex).name + " " + dms(ch.lagna.degreeInSign) + " · RULING PLANET " + g.name + " · " + g.yantraNote))}</text>`;
+    fy += fz(30);
+    body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(19), lagnaTail, fwFull, ls * 0.5)}" text-anchor="middle"
+      font-family="${display}" letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
+    fy += fz(28);
+    body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(17), note, fwFull, ls * 0.4)}" text-anchor="middle"
+      font-family="${display}" letter-spacing="${ls * 0.4}" opacity="0.8">${esc(note)}</text>`;
   } else {
     const x0 = w * 0.56, right = w - pad * 1.6;
-    let y = h * 0.235;
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(30)}" font-family="${display}" letter-spacing="${ls}"
-      >${esc(upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name))}</text>`;
-    y += fz(96);
-    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${fz(88)}" font-family="${dev}">${esc(nak.devanagari)}</text>`;
-    body += `<text x="${x0 + fz(210)}" y="${y - fz(46)}" fill="${soft}" font-size="${fz(54)}" font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
-    body += `<text x="${x0 + fz(290)}" y="${y - fz(44)}" fill="${soft}" font-size="${fz(24)}" font-family="${display}" letter-spacing="${ls * 0.7}">${esc(upper(nak.syllablesRoman[ch.moonPada - 1] + " · " + nak.deityRoman))}</text>`;
-    y += fz(70);
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(44)}" font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
-    y += fz(38);
-    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(26)}" font-family="${dev}">${esc(g.mantra.roman)}</text>`;
-    y += fz(30);
-    const S = Math.min((right - x0) * 0.5, h * 0.42);
-    body += kundli(ch, x0, y + fz(30), S, rule, soft, sw);
-    body += `<text x="${x0 + S + fz(40)}" y="${y + fz(70)}" fill="${soft}" font-size="${fz(24)}" font-family="${display}"
+    const fwCol = right - x0;
+    /* Same discipline as portrait: one baseline per block, the pada syllable on
+       its own row, and a kundli sized from the remaining height so it finishes
+       inside the inner frame, with the footer notes in the free column beside
+       it. The Latin runs are capped by fitGlyphs against fwCol. */
+    const headStr = upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name);
+    let y = h * 0.225;
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(30), headStr, fwCol, ls * 0.6)}" font-family="${display}"
+      letter-spacing="${ls * 0.6}">${esc(headStr)}</text>`;
+    y += fz(90);
+    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${fz(78)}" font-family="${dev}">${esc(nak.devanagari)}</text>`;
+    y += fz(58);
+    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(38)}" font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
+    body += `<text x="${x0 + fz(50)}" y="${y - fz(4)}" fill="${soft}" font-size="${fz(21)}" font-family="${display}" letter-spacing="${ls * 0.6}">${esc(upper(nak.syllablesRoman[ch.moonPada - 1] + " · " + nak.deityRoman))}</text>`;
+    y += fz(50);
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(34)}" font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
+    y += fz(36);
+    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), g.mantra.roman, fwCol)}" font-family="${dev}">${esc(g.mantra.roman)}</text>`;
+    y += fz(34);
+    // kundli fills the height left above the inner frame; footer to its right.
+    const kundliTop = y;
+    const S = Math.min(fwCol * 0.46, h - pad * 1.35 - kundliTop - fz(16), h * 0.36);
+    body += kundli(ch, x0, kundliTop, S, rule, soft, sw);
+    const fx = x0 + S + fz(40);
+    const fw = right - fx;
+    const lagnaTail = `LAGNA ${rashiOf(ch.lagna.signIndex).name} ${dms(ch.lagna.degreeInSign)} · RULING PLANET ${g.name}`;
+    body += `<text x="${fx}" y="${kundliTop + fz(46)}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fw, ls * 0.6)}" font-family="${display}"
       letter-spacing="${ls * 0.6}">${esc(upper(birthLine))}</text>`;
-    body += `<text x="${x0 + S + fz(40)}" y="${y + fz(110)}" fill="${soft}" font-size="${fz(23)}" font-family="${display}"
-      letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper("LAGNA " + rashiOf(ch.lagna.signIndex).name + " " + dms(ch.lagna.degreeInSign)))}</text>`;
-    body += `<text x="${x0 + S + fz(40)}" y="${y + fz(146)}" fill="${soft}" font-size="${fz(22)}" font-family="${display}"
-      opacity="0.8">${esc(g.name + " · " + g.yantraNote)}</text>`;
+    body += `<text x="${fx}" y="${kundliTop + fz(78)}" fill="${soft}" font-size="${fitGlyphs(fz(20), lagnaTail, fw, ls * 0.5)}" font-family="${display}"
+      letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
+    /* The yantra note is the longest run in the composition (the Rahu and Ketu
+       notes are two sentences); it word-wraps into the free column beside the
+       kundli, one fitted line per row, so it can never pass the frame. */
+    const noteLines = wrapToWidth(fz(9), upper(g.yantraNote), fw);
+    let ny = kundliTop + fz(112);
+    for (const ln of noteLines) {
+      body += `<text x="${fx}" y="${ny}" fill="${soft}" font-size="${fitGlyphs(fz(17), ln, fw)}" font-family="${display}"
+        opacity="0.8">${esc(ln)}</text>`;
+      ny += fz(20);
+    }
   }
 
-  const cornerMotifs = preset.cornerMotifs
+const cornerMotifs = preset.cornerMotifs
     ? [[pad * 2.1, pad * 2.1], [w - pad * 2.1, pad * 2.1], [pad * 2.1, h - pad * 2.1], [w - pad * 2.1, h - pad * 2.1]]
       .map(([cx, cy]) => `<g transform="translate(${cx} ${cy}) scale(${(w * 0.052).toFixed(1)})" color="${rule}" stroke="${rule}">${motifShape("lotus", (sw * 1.4) / (w * 0.052))}</g>`)
       .join("") : "";

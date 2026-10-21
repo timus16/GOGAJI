@@ -14,28 +14,11 @@ import { baiduKey } from "~/lib/server-key";
 import {
   buildReadingPrompt,
   sanitizeReading,
+  isUsableReading,
+  parseJsonPayload,
+  errorMessage,
   type Reading,
 } from "~/lib/gemini";
-
-/** A short, safe description of any thrown value (never leaks a key). */
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-/** Pull the first JSON object out of a model reply, tolerating code fences. */
-function parseJsonPayload(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = (fenced ? fenced[1] : trimmed).trim();
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end <= start) throw new Error("no JSON object in reply");
-    return JSON.parse(candidate.slice(start, end + 1));
-  }
-}
 
 const QIANFAN_BASE = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat";
 const QIANFAN_TIMEOUT_MS = 30_000;
@@ -55,7 +38,12 @@ export async function baiduReading(chartSummary: string): Promise<Reading> {
   const model = qianfanModel();
   const prompt = buildReadingPrompt(chartSummary);
 
-  const res = await fetch(`${QIANFAN_BASE}/${model}?access_token=${encodeURIComponent(key)}`, {
+  // The credential travels ONLY in the Authorization header below. It is never
+  // placed in the URL: query strings leak into proxy logs, browser history and
+  // error reports, which would expose the key. If a native Qianfan flow ever
+  // genuinely needs an `access_token`, fetch it as a short-lived token from the
+  // token endpoint — never by putting the API key in the URL.
+  const res = await fetch(`${QIANFAN_BASE}/${model}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -97,6 +85,6 @@ export async function baiduReading(chartSummary: string): Promise<Reading> {
   }
 
   const reading = sanitizeReading(parsed);
-  if (!reading) throw new Error("Baidu returned an unusable reading");
+  if (!isUsableReading(reading)) throw new Error("Baidu returned an unusable reading");
   return reading;
 }

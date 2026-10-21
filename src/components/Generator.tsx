@@ -186,6 +186,15 @@ export default function Generator() {
     if (useAI) {
       setAiBusy("reading");
       setAiError(null);
+      // Start every AI run from a clean slate: a previous success must never
+      // survive into the next chart. Clear the old reading, artwork and
+      // provider badge up front, and fall back to the chart view if the AI
+      // artwork was showing, so a later client-side rejection cannot leave the
+      // OLD reading, badge and art on screen under the NEW chart.
+      setAiReading(null);
+      setAiWallpaper(null);
+      setAiProvider(null);
+      setView((v) => (v === "ai" ? "chart" : v));
       let paintingTimer: ReturnType<typeof setTimeout> | null = null;
       try {
         paintingTimer = setTimeout(() => setAiBusy("wallpaper"), 3500);
@@ -196,13 +205,20 @@ export default function Generator() {
         if (res.image) setView("ai");
         if (res.provider) setAiProvider(res.provider);
       } catch (err) {
+        // The AI step rejected before returning a result: clear whatever a
+        // previous run left behind, so a stale reading, badge or artwork can
+        // never sit under the new chart, then surface the failure.
+        setAiReading(null);
+        setAiWallpaper(null);
+        setAiProvider(null);
+        setView((v) => (v === "ai" ? "chart" : v));
         setAiError(err instanceof Error ? err.message : String(err));
       } finally {
         if (paintingTimer) clearTimeout(paintingTimer);
         setAiBusy(null);
       }
     } else {
-      setAiReading(null); setAiWallpaper(null); setAiError(null); setView("chart");
+      setAiReading(null); setAiWallpaper(null); setAiProvider(null); setAiError(null); setView("chart");
     }
   };
 

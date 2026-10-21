@@ -15,6 +15,7 @@
 import { geminiKey } from "~/lib/server-key";
 import { openrouterReading } from "~/lib/openrouter";
 import { baiduReading } from "~/lib/baidu";
+import { LIFE_AREAS } from "~/content/problems";
 
 /** One remedy: a practice, its mantra in both scripts, its deity and its day. */
 export interface Remedy {
@@ -48,20 +49,12 @@ export interface Reading {
 export type ReadingProvider = "gemini" | "openrouter" | "baidu";
 
 /**
- * The closed vocabulary a reading may focus on. This mirrors `LIFE_AREAS` in
- * `~/content/problems` (the domain layer owns the canonical list) and MUST
- * stay identical to it — the model is only ever offered these values.
+ * The closed vocabulary a reading may focus on. The domain layer
+ * (`~/content/problems`) owns the canonical list, so it is imported here
+ * rather than re-declared (a literal copy could silently drift); the model
+ * is only ever offered exactly these values.
  */
-const ALLOWED_LIFE_AREAS: string[] = [
-  "career",
-  "wealth",
-  "relationships",
-  "health",
-  "education",
-  "spiritual",
-  "protection",
-  "family",
-];
+const ALLOWED_LIFE_AREAS: readonly string[] = LIFE_AREAS;
 
 /** The Gemini model id that works with the current key. */
 const GEMINI_MODEL = "gemini-3.8-flash";
@@ -195,19 +188,42 @@ export function sanitizeReading(raw: unknown): Reading | null {
 
 /* ------------------------------------------------------------ json plumbing */
 
-/** Remove a markdown code fence and any prose around a JSON object. */
-export function stripJsonFences(text: string): string {
-  let out = text.trim();
-  out = out.replace(/^```[a-zA-Z]*\s*/, "").replace(/\s*```$/, "");
-  const first = out.indexOf("{");
-  const last = out.lastIndexOf("}");
-  if (first >= 0 && last > first) out = out.slice(first, last + 1);
-  return out.trim();
-}
-
-/** Parse a model answer that should contain one JSON object. Throws on failure. */
+/**
+ * Parse a model answer that should contain one JSON object. The three
+ * providers wrap their JSON differently, so we try, in order: the trimmed text
+ * as-is, a fenced ```json block anywhere in it, then the widest slice from the
+ * first `{` to the last `}`. The first that parses wins; when none do we throw
+ * one shared error so every provider fails the same way.
+ */
 export function parseJsonPayload(text: string): unknown {
-  return JSON.parse(stripJsonFences(text));
+  const trimmed = text.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // not bare JSON — keep looking
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // malformed fence — try the brace slice
+    }
+  }
+
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try {
+      return JSON.parse(trimmed.slice(first, last + 1));
+    } catch {
+      // not a JSON object either — fall through to the error
+    }
+  }
+
+  throw new Error("no JSON object in reply");
 }
 
 /** A short, safe description of any thrown value (never leaks a key). */
@@ -270,34 +286,85 @@ export async function geminiReading(chartSummary: string): Promise<Reading> {
   }
 
   const reading = sanitizeReading(parsed);
-  if (!reading) throw new Error("Gemini returned an unusable reading");
+  if (!isUsableReading(reading)) throw new Error("Gemini returned an unusable reading");
   return reading;
 }
 
+/* -------------------------------------------------------------------- cache */
+
 /**
- * The reading chain: Gemini first, then OpenRouter, then Baidu. Every step is
- * a real call. If all three fail, one error naming all three causes is
+ * A small per-instance, in-memory cache of finished readings, keyed by the
+ * exact fact sheet. It stops an identical chart from re-hitting the provider
+ * chain, whose calls cost real tokens. It is bounded to 200 entries with a
+ * 24h TTL and lives only in this process: not shared, not persisted, and it
+ * never caches a failure — only a fully validated reading is stored.
+ */
+const READING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const READING_CACHE_MAX = 200;
+const readingCache = new Map<
+  string,
+  { at: number; reading: Reading; provider: ReadingProvider }
+>();
+
+/** Return a still-fresh cached reading, dropping it once it has expired. */
+function readCachedReading(
+  chartSummary: string,
+): { reading: Reading; provider: ReadingProvider } | null {
+  const hit = readingCache.get(chartSummary);
+  if (!hit) return null;
+  if (Date.now() - hit.at > READING_CACHE_TTL_MS) {
+    readingCache.delete(chartSummary);
+    return null;
+  }
+  return { reading: hit.reading, provider: hit.provider };
+}
+
+/** Store a validated reading, dropping the oldest entry once at the cap. */
+function cacheReading(
+  chartSummary: string,
+  reading: Reading,
+  provider: ReadingProvider,
+): void {
+  if (readingCache.size >= READING_CACHE_MAX) {
+    const oldest = readingCache.keys().next().value;
+    if (oldest !== undefined) readingCache.delete(oldest);
+  }
+  readingCache.set(chartSummary, { at: Date.now(), reading, provider });
+}
+
+/**
+ * The reading chain: a cache hit first, then Gemini, OpenRouter, Baidu. Every
+ * step is a real call. If all three fail, one error naming all three causes is
  * thrown so the caller can report one readable line.
  */
 export async function readKundli(
   chartSummary: string,
 ): Promise<{ reading: Reading; provider: ReadingProvider }> {
+  const cached = readCachedReading(chartSummary);
+  if (cached) return cached;
+
   const failures: string[] = [];
 
   try {
-    return { reading: await geminiReading(chartSummary), provider: "gemini" };
+    const reading = await geminiReading(chartSummary);
+    cacheReading(chartSummary, reading, "gemini");
+    return { reading, provider: "gemini" };
   } catch (err) {
     failures.push(`gemini: ${errorMessage(err)}`);
   }
 
   try {
-    return { reading: await openrouterReading(chartSummary), provider: "openrouter" };
+    const reading = await openrouterReading(chartSummary);
+    cacheReading(chartSummary, reading, "openrouter");
+    return { reading, provider: "openrouter" };
   } catch (err) {
     failures.push(`openrouter: ${errorMessage(err)}`);
   }
 
   try {
-    return { reading: await baiduReading(chartSummary), provider: "baidu" };
+    const reading = await baiduReading(chartSummary);
+    cacheReading(chartSummary, reading, "baidu");
+    return { reading, provider: "baidu" };
   } catch (err) {
     failures.push(`baidu: ${errorMessage(err)}`);
   }

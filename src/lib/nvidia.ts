@@ -25,6 +25,60 @@ export interface WallpaperImage {
   height: number;
 }
 
+/*
+ * ------------------------------------------------------------- image cache
+ *
+ * The docs promise a seven-day image cache, so an identical prompt must not
+ * re-call the paid model. The key is the FINAL prompt plus the render
+ * parameters that change the pixels (seed, width, height); the model itself
+ * is fixed by NVIDIA_ENDPOINT, so it needs no separate key part.
+ *
+ * CAVEAT: this cache lives IN MEMORY, so it is PER INSTANCE - a restart, a
+ * redeploy or a second replica starts empty. It bounds cost within one
+ * long-lived server, which is the deployment `serve.ts` runs. Failures are
+ * never cached: only a successfully painted image is stored.
+ */
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
+
+interface CachedImage {
+  value: WallpaperImage;
+  expiresAt: number;
+}
+
+const imageCache = new Map<string, CachedImage>();
+
+/** The cache key: seed + geometry + the exact prompt bytes. */
+function imageCacheKey(prompt: string, width: number, height: number, seed: number): string {
+  return `${seed}|${width}x${height}|${prompt}`;
+}
+
+/** Read a live entry, dropping it first if it has expired. */
+function readImageCache(key: string): WallpaperImage | undefined {
+  const hit = imageCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() >= hit.expiresAt) {
+    imageCache.delete(key);
+    return undefined;
+  }
+  return hit.value;
+}
+
+/** Store a successful image, evicting expired entries and then the oldest. */
+function writeImageCache(key: string, value: WallpaperImage): void {
+  const now = Date.now();
+  if (imageCache.size >= CACHE_MAX_ENTRIES) {
+    for (const [k, v] of imageCache) if (now >= v.expiresAt) imageCache.delete(k);
+    // Still full: drop the oldest insertion (a Map preserves insertion order).
+    while (imageCache.size >= CACHE_MAX_ENTRIES) {
+      const oldest = imageCache.keys().next().value;
+      if (oldest === undefined) break;
+      imageCache.delete(oldest);
+    }
+  }
+  imageCache.set(key, { value, expiresAt: now + CACHE_TTL_MS });
+}
+
 /**
  * Sniff the real mime type from the magic bytes. The API field is called
  * `base64` but the bytes are frequently JPEG, so the type is never taken on
@@ -72,6 +126,9 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
  *
  * The model may answer either with inline base64 or with a URL to fetch; both
  * are handled. The returned mime type is always sniffed from the bytes.
+ *
+ * A successful result is memoised (see the image cache above) so an identical
+ * prompt is painted once, not once per visitor.
  */
 export async function nvidiaWallpaper(
   prompt: string,
@@ -81,6 +138,11 @@ export async function nvidiaWallpaper(
   const width = opts?.width ?? DEFAULT_WIDTH;
   const height = opts?.height ?? DEFAULT_HEIGHT;
   const seed = opts?.seed ?? DEFAULT_SEED;
+
+  // Serve an identical request from the cache without touching the paid model.
+  const cacheKey = imageCacheKey(prompt, width, height, seed);
+  const cached = readImageCache(cacheKey);
+  if (cached) return cached;
 
   const res = await fetch(NVIDIA_ENDPOINT, {
     method: "POST",
@@ -114,7 +176,9 @@ export async function nvidiaWallpaper(
     const bytes = new Uint8Array(Buffer.from(inline, "base64"));
     if (bytes.length === 0) throw new Error("NVIDIA returned an empty image");
     const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
-    return { dataUrl, mime, width, height };
+    const image: WallpaperImage = { dataUrl, mime, width, height };
+    writeImageCache(cacheKey, image);
+    return image;
   }
 
   const url =
@@ -133,7 +197,9 @@ export async function nvidiaWallpaper(
     const bytes = new Uint8Array(await imgRes.arrayBuffer());
     if (bytes.length === 0) throw new Error("NVIDIA image download was empty");
     const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
-    return { dataUrl, mime, width, height };
+    const image: WallpaperImage = { dataUrl, mime, width, height };
+    writeImageCache(cacheKey, image);
+    return image;
   }
 
   throw new Error("NVIDIA returned no image data");

@@ -14,28 +14,11 @@ import { openrouterKey } from "~/lib/server-key";
 import {
   buildReadingPrompt,
   sanitizeReading,
+  isUsableReading,
+  parseJsonPayload,
+  errorMessage,
   type Reading,
 } from "~/lib/gemini";
-
-/** A short, safe description of any thrown value (never leaks a key). */
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-/** Pull the first JSON object out of a model reply, tolerating code fences. */
-function parseJsonPayload(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = (fenced ? fenced[1] : trimmed).trim();
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
-    if (start === -1 || end <= start) throw new Error("no JSON object in reply");
-    return JSON.parse(candidate.slice(start, end + 1));
-  }
-}
 
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_REFERER = "https://nakshatra-canvas.app";
@@ -162,7 +145,7 @@ export async function openrouterReading(chartSummary: string): Promise<Reading> 
     }
 
     const reading = sanitizeReading(parsed);
-    if (!reading) {
+    if (!isUsableReading(reading)) {
       failures.push(`${model}: unusable reading`);
       continue;
     }

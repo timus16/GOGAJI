@@ -12,10 +12,14 @@ export default defineConfig({
     // masks the Host to localhost:3000, but accept any host so a dev server never
     // rejects a proxied request with "Blocked request".
     allowedHosts: true,
-    // The dev server is reachable through the TLS proxy, so the HMR websocket
-    // must dial back on 443, not the dev port. If the socket can't connect,
-    // pages still serve — hot reload degrades, never breaks.
-    hmr: { clientPort: 443 },
+    // HMR client port is opt-in. Behind the TLS reverse proxy the browser must
+    // dial back on 443, so set HMR_CLIENT_PORT=443 for that deployment. On plain
+    // localhost the same setting makes the browser try ws://localhost:443 and
+    // fail with ERR_CONNECTION_REFUSED plus a 404 in the console, so when the
+    // variable is unset we leave HMR at Vite's default (the dev port, auto-
+    // detected) and hot reload works again. If the socket still cannot connect,
+    // pages always serve — hot reload only degrades, never breaks.
+    hmr: process.env.HMR_CLIENT_PORT ? { clientPort: Number(process.env.HMR_CLIENT_PORT) } : undefined,
     // The dev server can serve source files; never let it serve local secrets,
     // and never let it serve anything outside the site dir. Gotchas this list
     // encodes: a custom `deny` REPLACES Vite's defaults (so .git must be

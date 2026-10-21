@@ -1,6 +1,6 @@
 ---
 name: astrology-premium-service
-description: Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the Gemini reading step, the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".
+description: Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (Gemini, OpenRouter, Baidu), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".
 ---
 
 # Astrology Premium Service (GOGAJI)
@@ -15,10 +15,13 @@ contract for that pipeline.
 |---|---|
 | `src/lib/astro.ts` | Chart engine. Pure functions, no I/O, browser-safe. `computeChart`, `localToUtc`, `lahiriAyanamsa`, `moonLongitude`, `meanNode`, `tropicalAscendant`, `dms`, `rashiOf`, `formatOffset` |
 | `src/content/vedic-mapping.ts` | **All** Vedic data: `GRAHAS` (colour/mantra/yantra), `NAKSHATRAS` (27, with lord/deity/symbol/motif/gana/pada-syllables), `RASHIS`, `PRESETS` (4 style archetypes), `NAK_SPAN`, `PADA_SPAN` |
-| `src/content/problems.ts` | Problem-set domain model: `LifeArea`, `AstroCondition`, `BirthChartConditions`, `assessChart`, `PROBLEM_SET`, `GRAHA_DAYS`, fact sheet builder |
-| `src/lib/gemini.ts` | Reading step. `geminiReading(chartSummary) -> Reading` |
-| `src/lib/nvidia.ts` | Artwork step. `promptFromBrief(reading, chartFacts)`, `nvidiaWallpaper(prompt, w, h, seed)` |
-| `src/server/ai.ts` | Server function that orchestrates the whole thing (`generateWallpaper`) |
+| `src/content/problems.ts` | Problem-set domain model: `LifeArea` + `LIFE_AREAS` (8), `AstroCondition`, `BirthChartConditions`, `assessChart`, `chartFactSheet` (the fact sheet builder) |
+| `src/lib/gemini.ts` | Reading layer: canonical prompt, shared `sanitizeReading`/`parseJsonPayload`/`errorMessage`/`isUsableReading`, the 24h reading cache, and the chain `readKundli(chartSummary) -> { reading, provider }`. `geminiReading` is the first provider |
+| `src/lib/openrouter.ts` | Second reading provider (`openrouterReading`): OpenRouter zero-priced models, at most 3 attempts |
+| `src/lib/baidu.ts` | Third reading provider (`baiduReading`): Baidu Qianfan / ERNIE; the key travels only in the `Authorization` header, never in the URL |
+| `src/lib/nvidia.ts` | Artwork step. `promptFromBrief(reading, chartFacts)`, `nvidiaWallpaper(prompt, opts)`, plus a 7-day per-instance image cache and magic-byte mime sniffing (`sniffImageMime`) |
+| `src/lib/server-key.ts` | Single server-only place that reads the four provider keys from `process.env` (`geminiKey`, `openrouterKey`, `baiduKey`, `nvidiaKey`) |
+| `src/server/ai.ts` | Server function that orchestrates the whole thing (`generateWallpaper` / `buildWallpaperResponse`): request-wide AI budget, in-memory per-IP rate limit, never throws |
 | `src/lib/wallpaper.ts` | Deterministic SVG wallpaper renderer (`buildWallpaperSvg`) - the free fallback |
 | `scripts/validate-chart.ts` | Engine validator + magic-square verifier |
 | `scripts/horizons-compare.ts` | Engine vs NASA/JPL Horizons comparison |
@@ -30,7 +33,7 @@ contract for that pipeline.
 | Concern | Owner | Why |
 |---|---|---|
 | Planetary longitudes, ayanāṃśa, lagna, house placement, retrogression | `src/lib/astro.ts` - deterministic Meeus/JPL algorithms | Reproducible, testable, externally checkable against NASA/JPL Horizons |
-| Interpretation of the computed facts | Gemini (`src/lib/gemini.ts`) | Language, framing, remediation phrasing |
+| Interpretation of the computed facts | Gemini, then OpenRouter, then Baidu (`src/lib/gemini.ts`) | Language, framing, remediation phrasing; every provider gets the same prompt and the same validator |
 | Wallpaper artwork | NVIDIA flux.1-dev (`src/lib/nvidia.ts`) | Image generation |
 | Yantra grid, kundli, mandala, palette, Devanagari typography | `src/lib/wallpaper.ts` - deterministic SVG | Vector precision, zero cost, works with no API key |
 
@@ -60,26 +63,32 @@ birth input (name, date, time, place, lat, lon, IANA timezone)
        retrogression, ruling planet (nakshatra lord), pada syllable, notes
   -> assessChart(chart)        src/content/problems.ts
        conditions[] + positives[] (deterministic heuristics over the Chart)
-  -> fact sheet (chart facts + conditions + positives)  src/content/problems.ts
-  -> geminiReading(facts)      src/lib/gemini.ts
+  -> chartFactSheet(chart, conditions)   src/content/problems.ts
+       facts{} + flat text (chart facts + conditions + positives)
+  -> readKundli(factSheetText) src/lib/gemini.ts
+       cache hit, else the chain Gemini -> OpenRouter -> Baidu
+       -> { reading, provider }; empty/unusable answers fall through
        condition, primary: LifeArea[], reading, remedies[], affirmation,
        wallpaperBrief { mood, palette, motifs, inscription }
   -> promptFromBrief(reading, chartFacts)   src/lib/nvidia.ts
-  -> nvidiaWallpaper(prompt, 832, 1216, seed)  src/lib/nvidia.ts
+  -> nvidiaWallpaper(prompt, { width: 832, height: 1216 })  src/lib/nvidia.ts
        -> { dataUrl, mime, width, height }
   -> composite / present: deterministic SVG (src/lib/wallpaper.ts) + AI art + reading UI
 ```
 
 `src/server/ai.ts` exposes `generateWallpaper` as a `createServerFn({ method: "POST" })`
-and returns chart summary + conditions + reading + optional image + the prompt + an
-`error` string. On any AI failure it still returns the chart and conditions so the
-client degrades gracefully instead of rendering nothing.
+and returns chart summary + conditions + reading + optional image + the prompt + the
+answering `provider` + an `error` string. It **never throws**: the whole request is
+budgeted (`AI_READING_BUDGET_MS` = 70 s over the reading chain, `AI_IMAGE_BUDGET_MS` =
+95 s over the NVIDIA call plus any image download), an in-memory per-IP fixed-window
+rate limit gates the paid path (`AI_RATE_LIMIT_PER_MIN`, default 5/min), and every
+failure degrades to the chart-accurate result.
 
 **Degradation order (must always work):**
 
 1. AI image (NVIDIA) - richest
 2. Deterministic SVG wallpaper (`buildWallpaperSvg`) - free, always available
-3. Reading text - if Gemini fails, show the conditions and the deterministic chart only
+3. Reading text - if every reading provider fails, show the conditions and the deterministic chart only
 4. Never fail the page because a key is missing or a provider is down
 
 ## 3. PROBLEM SET MODEL (`src/content/problems.ts`)
@@ -101,21 +110,22 @@ client degrades gracefully instead of rendering nothing.
 
 Negative `conditions[]` (deterministic, whole-sign house + retrogression heuristics):
 
-| Key | Trigger (approximate) |
+| Key | Trigger (as implemented in `assessChart`) |
 |---|---|
-| `harsh-saturn` | Saturn retrograde or in a dusthana (1/6/8/12) |
+| `harsh-saturn` | Saturn in a dusthāna (6/8/12), debilitated, retrograde, or in the 7th/8th/9th from the Moon (sade sātī phase) |
 | `mangal-dosha` | Mars in the 1st, 4th, 7th, 8th, or 12th house |
-| `weak-lagna-lord` | Lagna lord retrograde or in a dusthana |
-| `afflicted-moon` | Moon in a dusthana or retrograde |
-| `ketu-detachment` | Ketu in the 1st, 7th, or 10th from the lagna |
-| `rahu-obsession` | Rāhu in the 1st, 7th, or 10th from the lagna |
-| `budha-retrograde` | Mercury retrograde (communication/dispute axis) |
-| `venus-afflicted` | Venus retrograde or in a dusthana |
-| `sun-afflicted` | Sun in a dusthana (authority/self axis) |
-| `jupiter-afflicted` | Jupiter retrograde or in a dusthana (guidance/dharma axis) |
+| `afflicted-moon` | Moon in a dusthāna (6/8/12), debilitated, on the Rāhu-Ketu axis, or in a Rākṣasa-gaṇa nakshatra |
+| `weak-lagna-lord` | Lagna lord in a dusthāna (6/8/12), debilitated, or retrograde |
+| `retrograde-mercury` | Mercury retrograde |
+| `rahu-ketu-emphasis` | Rāhu or Ketu in an angle (1/4/7/10), in the lagna, conjunct the lagna lord, or Rāhu conjunct the Moon |
+| `afflicted-venus` | Venus in a dusthāna (6/8/12), debilitated, or retrograde |
+| `afflicted-sun` | Sun in the 6th or 12th, debilitated, or conjunct Rāhu |
+| `afflicted-jupiter` | Jupiter in a dusthāna (6/8/12) |
+| `malefics-in-angles` | Two or more natural malefics in the kendras (1/4/7/10) |
 
-Positive `positives[]` (same heuristic family, e.g. `benefic-jupiter`, benefic placements
-of Venus/Moon/Mercury in kendras and trikonas).
+Positive `positives[]` (same deterministic family): `strong-jupiter`, `exalted-benefic`
+(a natural benefic exalted), `own-sign-benefic` (a natural benefic in its own sign),
+`favourable-moon-nakshatra`, `strong-lagna-lord`, and `waxing-moon`.
 
 ### STATUS: PROVISIONAL
 
@@ -125,6 +135,9 @@ functional benefic/malefic weighting are **not** modelled. The rules mirror the 
 
 - Every heuristic is a **data entry**, not a hard-coded branch. Add, reword, or retire a
   condition by editing `src/content/problems.ts`.
+- The mūlatrikona (`TRIKONA`) table is verified against `OWN_SIGNS`: each value is a sign
+  the graha actually rules (the Moon is the one classical exception - it rules Cancer but
+  its mūlatrikona is Taurus). Keep the two tables consistent when editing.
 - Never present a condition to a user as a classical verdict. Present it as a reading of
   the computed chart, in a devotional register.
 - When a rule cannot be grounded, mark it PROVISIONAL in-file rather than inventing a
@@ -173,9 +186,12 @@ birth time given to the minute - see the validator's printed sensitivity note.
   header already keeps a numbered list of what could not be verified.
 - When changing a magic-square `order`, change the data and re-run
   `bun run scripts/validate-chart.ts` - the renderer re-verifies the magic constant.
-- When changing a preset, keep the `StylePreset` contract: `bg`, `ink`, `inkSoft`, `rule`,
-  `texture`, `rings`, `petals`, `bhupura`, `cornerMotifs`, `starField`, `lineWeight`,
-  `displayFont`, `letterSpacing`, `uppercase`, `dark`.
+- The four style preset ids are `temple-gold`, `indigo-midnight`, `minimal-line` and
+  `dense-mandala` (note: `minimal-line`, **not** `minimal-line-art`); `presetById()` falls
+  back to `PRESETS[0]`. When changing a preset, keep the `StylePreset` contract: `id`,
+  `name`, `blurb`, `bg`, `ink`, `inkSoft`, `rule`, `accentOpacity`, `texture`, `rings`,
+  `petals`, `bhupura`, `cornerMotifs`, `starField`, `lineWeight`, `displayFont`,
+  `letterSpacing`, `uppercase`, `dark`.
 - Devanagari must render as glyphs, never tofu: the wallpapers declare
   `'Noto Sans Devanagari'` in the `@font-face` rules and the reading UI points at that
   family explicitly. Do not replace it with a generic `serif` fallback.
@@ -187,23 +203,34 @@ birth time given to the minute - see the validator's printed sensitivity note.
 | Var | Used by | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | `src/lib/gemini.ts` | Google AI Studio key. Read from `process.env` in server-only code. Never written to a file, never echoed |
+| `OPENROUTER_API_KEY` | `src/lib/openrouter.ts` | OpenRouter key (second provider). Same rules |
+| `BAIDU_API_KEY` | `src/lib/baidu.ts` | Baidu Qianfan key (third provider). Sent **only** in the `Authorization` header, never in the URL. Same rules |
 | `NVIDIA_API_KEY` | `src/lib/nvidia.ts` | NVIDIA key (`nvapi-...`). Same rules |
+| `AI_RATE_LIMIT_PER_MIN` | `src/server/ai.ts` | Per-IP requests per minute for AI generation. Default 5 |
+| `BAIDU_MODEL_ID` | `src/lib/baidu.ts` | Optional Qianfan model override. Default `ernie-3.5-8k` |
 
-`src/lib/server-key.ts` is the single place that reads them and throws a clear
-missing-key error. `.env.example` holds placeholders only. A real `.env` is never committed.
+`src/lib/server-key.ts` is the single place that reads them (`geminiKey`, `openrouterKey`,
+`baiduKey`, `nvidiaKey`) and throws a clear missing-key error. On a deployed host the keys
+come from the **host secret store**, not from `.env`: a `.env` file is local-dev only and is
+not published, so a key that lives only in `.env` is missing live. `.env.example` holds
+placeholders only; a real `.env` is never committed.
 
 ### Verified model ids and endpoints
 
 | Service | Model / URL | Status |
 |---|---|---|
 | Gemini text | `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent` | **Works** on this key. `gemini-2.5-flash` 404s for new keys - do not use it |
-| Gemini auth | `?key=<KEY>` query param, with `X-Goog-Api-Key` header fallback | Header-only retry on 400/401/403 |
+| Gemini auth | `x-goog-api-key: <KEY>` request header | Header only - the key is never put in the URL |
 | Gemini images | `gemini-2.5-flash-image` / `gemini-3.1-flash-image` / `gemini-3-pro-image` | **Free tier image quota is 0** - every image call returns 429 `RESOURCE_EXHAUSTED` (limit 0, retry ~6.5 h). **Images must come from NVIDIA**, not Gemini |
 | NVIDIA image | `POST https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev` | **The only working image endpoint.** `artifacts[0].base64` holds the bytes |
 | NVIDIA alt | `black-forest-labs/flux.1-schnell` | Hangs (HTTP 000) - do not use |
 | NVIDIA alt | `stabilityai/stable-diffusion-3-5-large` | HTTP 404 `page not found` - do not use |
 | NVIDIA alt | `https://integrate.api.nvidia.com/v1/images/generations` | HTTP 404 - do not use |
 | NVIDIA auth | `Authorization: Bearer <NVIDIA_API_KEY>` | Header name exactly as shown |
+| OpenRouter text | `POST https://openrouter.ai/api/v1/chat/completions` | Second provider. Zero-priced models only, at most 3 attempts; retries on 402/404/429/5xx, stops on other statuses |
+| OpenRouter auth | `Authorization: Bearer <OPENROUTER_API_KEY>` + `HTTP-Referer`, `X-Title` | Header only |
+| Baidu Qianfan | `POST https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/<model>` | Third provider; model defaults to `ernie-3.5-8k` (permanent free tier) |
+| Baidu auth | `Authorization: Bearer <BAIDU_API_KEY>` | Header only - **never** in the URL |
 
 Response bytes from flux.1-dev may be **JPEG even when the file is named `.png`**. Sniff
 the magic bytes (`FF D8 FF` = jpeg, `89 50 4E 47` = png) and label the MIME accordingly.
@@ -215,11 +242,25 @@ Never mislabel; never guess.
 |---|---|---|
 | Gemini 429 `RESOURCE_EXHAUSTED`, "limit: 0" | Free-tier image quota is zero | Expected. Do not retry in a loop. Use the deterministic SVG path |
 | Gemini 404 on `gemini-2.5-flash` | Deprecated for new users | Use `gemini-3.8-flash` |
-| Gemini returns non-JSON | Model ignored `responseMimeType` | Throw. **Never fabricate a reading** |
+| Gemini returns non-JSON | Model ignored `responseMimeType` | Throw inside that provider; the chain falls through to the next. **Never fabricate a reading** |
 | NVIDIA HTTP 000 / hang | flux.1-schnell or a slow model | Switch to flux.1-dev; keep the 60 s AbortSignal |
 | NVIDIA 404 `page not found` | Wrong endpoint or model id | Use the flux.1-dev genai endpoint |
 | Missing key | `process.env` unset in the host | Fall back to the deterministic SVG; surface a clear message |
-| Provider timeout | 45 s Gemini / 60 s NVIDIA | The server fn must still return chart + conditions + error |
+| Provider timeout | 45 s Gemini / 30 s OpenRouter / 30 s Baidu / 60 s NVIDIA | Each is under the 70 s reading / 95 s image budget; the server fn must still return chart + conditions + error |
+| Rate limit tripped | More than `AI_RATE_LIMIT_PER_MIN` (default 5) requests/min from one IP | Return the normal response shape with an `error` and make no provider call |
+
+### Deploy targets
+
+- **Primary: Bun.** `serve.ts` serves the built app via `bun run start` (`bun run build`
+  first; `bun run publish` wraps it). It pins Bun's `idleTimeout` to 255 s - the request
+  budget in `src/server/ai.ts` is sized to stay under that.
+- **Cloudflare Workers (optional).** `bun run build:cloudflare` bundles the Worker + SSR
+  handler to `dist/cloudflare-worker/index.js`, then `npx wrangler deploy`. Requires the
+  Workers **Paid** plan: `limits.cpu_ms` cannot be raised above the Free plan's 10 ms, and
+  SSR plus an AI call exceeds it. See `docs/CLOUDFLARE-DEPLOY.md`.
+- **Secrets** come from the host secret store (Worker secrets via
+  `npx wrangler secret put <NAME>`), never from `.env` and never from `wrangler.jsonc`
+  `vars` (which is public and holds non-secret config only).
 
 ### Validation commands
 
@@ -245,15 +286,21 @@ extensionless imports.
 
 ## 7. COST DISCIPLINE
 
-- **One server round-trip per generation.** The client calls the server function once; the
-  server calls Gemini once and NVIDIA once. Never loop the round-trip.
-- **Never call the image model twice for the same chart.** Cache the prompt and the seed
-  (both `src/lib/gemini.ts` and `src/lib/nvidia.ts` keep an in-memory cache - Gemini 24 h,
-  NVIDIA 7 days). A stable seed with the same prompt is what makes the artwork reproducible.
+- **One server round-trip per generation.** The client calls the server function once. The
+  reading is a chain (Gemini -> OpenRouter -> Baidu) that stops at the first usable answer,
+  and NVIDIA is called once. Never loop the round-trip.
+- **Never re-generate the same work.** Caches now really exist and are per-instance and
+  in-memory (they start empty on a restart or a second replica): `src/lib/gemini.ts` keeps
+  a 24 h reading cache (max 200 entries) keyed by the exact fact sheet, and
+  `src/lib/nvidia.ts` keeps a 7-day image cache (max 50 entries) keyed by
+  seed + width x height + the exact prompt. Only successes are cached. A stable seed with
+  the same prompt is what makes the artwork reproducible.
 - **The deterministic SVG path is the free fallback and must keep working with no keys.**
   `buildWallpaperSvg` is a pure function; it must never require a key, a network call, or
   an AI model. If a change breaks the no-key path, that change is wrong.
-- Timeouts are part of the cost model: 45 s Gemini, 60 s NVIDIA, plus retry only where
-  the failure is transient. Do not add unbounded retries.
-- Long AI work must be a `POST` server function (never a GET the gateway can re-send), and
-  should stream or poll if it regularly runs past ~20 s.
+- Timeouts are part of the cost model: 45 s Gemini, 30 s OpenRouter, 30 s Baidu, 60 s
+  NVIDIA, all under a 70 s reading and 95 s image budget. Retry only where the failure is
+  transient; do not add unbounded retries.
+- The paid path is rate-limited per IP (`AI_RATE_LIMIT_PER_MIN`, default 5/min, in-memory
+  and per-instance). Long AI work must be a `POST` server function (never a GET the gateway
+  can re-send), and should stream or poll if it regularly runs past ~20 s.

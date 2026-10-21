@@ -51,12 +51,16 @@
   // Non-secret configuration only. Every value here is public in the deployed
   // bundle — never put an API key in this block.
   //
-  // SECRETS: GEMINI_API_KEY, NVIDIA_API_KEY and OPENROUTER_API_KEY are NOT
-  // listed here and must never be added here. They are Worker secrets and are
-  // set with:
+  // SECRETS: GEMINI_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY and
+  // BAIDU_API_KEY are NOT listed here and must never be added here. They are
+  // read at request time from process.env (src/lib/server-key.ts) and are
+  // Worker secrets, set with:
   //   npx wrangler secret put GEMINI_API_KEY
   //   npx wrangler secret put NVIDIA_API_KEY
   //   npx wrangler secret put OPENROUTER_API_KEY
+  //   npx wrangler secret put BAIDU_API_KEY
+  // DATABASE_URL is an optional secret for the Neon-backed persistence path
+  // (src/db.ts); set it the same way if that path is used.
   // (See docs/CLOUDFLARE-DEPLOY.md. Per SITE.md, a .env file is NOT published,
   // so a key that only lives in .env is missing on the live site.)
   "vars": {

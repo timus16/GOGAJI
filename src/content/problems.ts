@@ -107,14 +107,26 @@ const OWN_SIGNS: Partial<Record<PlanetKey, number[]>> = {
   saturn: [9, 10],
 };
 
-/** mūlatrikona — the single sign of the mūlatrikona, by sign index. */
+/**
+ * The mūlatrikona sign, by sign index.
+ *
+ * Each value must be a sign the graha actually RULES (cross-checked against OWN_SIGNS above):
+ *  - sun Leo (4) ok;  mercury Virgo (5) ok;  saturn Aquarius (10) ok
+ *  - mars Aries (0), NOT Cancer (3): Mars rules Aries/Scorpio; mūlatrikona is Aries.
+ *  - jupiter Sagittarius (8), NOT Cancer (3): Jupiter rules Sagittarius/Pisces.
+ *  - venus Libra (6), NOT Scorpio (7): Venus rules Taurus/Libra.
+ *  - moon Taurus (1) is the one classical exception: the Moon RULES Cancer (3)
+ *    but its mūlatrikona is Taurus, so it is deliberately not in OWN_SIGNS.
+ * The old Mars/Jupiter/Venus values made `isTrikona()` fire false "in its
+ * mūlatrikona" positives (e.g. a Cancer Jupiter reported as being in mūlatrikona).
+ */
 const TRIKONA: Partial<Record<PlanetKey, number>> = {
   sun: 4,
   moon: 1,
-  mars: 3,
+  mars: 0,
   mercury: 5,
-  jupiter: 3,
-  venus: 7,
+  jupiter: 8,
+  venus: 6,
   saturn: 10,
 };
 
@@ -574,7 +586,13 @@ const HOUSE_NAMES = [
  * the flat, token-optimised version that goes into the prompt. It is kept
  * under roughly 1200 characters so the request stays cheap.
  */
-export function chartFactSheet(chart: Chart): { facts: Record<string, string>; text: string } {
+export function chartFactSheet(
+  chart: Chart,
+  // Optional precomputed assessment (e.g. from `src/server/ai.ts`): when given,
+  // the condition pass is reused instead of running `assessChart()` a second
+  // time. The parameter is optional, so `chartFactSheet(chart)` is unchanged.
+  assessment?: BirthChartConditions,
+): { facts: Record<string, string>; text: string } {
   const nak = chart.moonNakshatra;
   const lagnaRashi = RASHIS[chart.lagna.signIndex];
   const lagnaLord = lagnaRashi.lord;
@@ -595,7 +613,9 @@ export function chartFactSheet(chart: Chart): { facts: Record<string, string>; t
     })
     .join("; ");
 
-  const { conditions, positives } = assessChart(chart);
+  // Reuse the caller's assessment when supplied so `assessChart` does not run
+  // a second time per request; `chartFactSheet(chart)` still works unchanged.
+  const { conditions, positives } = assessment ?? assessChart(chart);
 
   const facts: Record<string, string> = {
     nakshatra: nak.name,

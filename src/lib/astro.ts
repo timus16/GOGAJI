@@ -352,10 +352,10 @@ export function computeChart(input: BirthInput): Chart {
 }
 
 export const dms = (deg: number) => {
-  const d = Math.floor(deg);
-  const mF = (deg - d) * 60;
-  const m = Math.floor(mF);
-  const s = Math.round((mF - m) * 60);
+  const total = Math.round(deg * 3600);
+  const d = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
   return `${d}°${String(m).padStart(2, "0")}'${String(s).padStart(2, "0")}"`;
 };
 
