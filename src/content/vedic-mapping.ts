@@ -117,6 +117,13 @@ export interface StylePreset {
   letterSpacing: number;
   uppercase: boolean;
   dark: boolean;
+  /**
+   * Opacity (0..1) of the full-bleed scrim drawn over an AI background image,
+   * strongest behind the text column, so the Devanagari, mantra, kundli and
+   * footer stay crisp over a photograph. Dark presets lay a near-black scrim,
+   * light presets a warm off-white one. Unused when backgroundImageUrl is absent.
+   */
+  artScrim: number;
 }
 
 /* ------------------------------------------------------------------ grahas */
@@ -393,6 +400,7 @@ export const PRESETS: StylePreset[] = [
     texture: "grain",
     rings: 4, petals: 24, bhupura: true, cornerMotifs: true, starField: 40,
     lineWeight: 1.6, displayFont: "serif", letterSpacing: 4, uppercase: true, dark: true,
+    artScrim: 0.64,
   },
   {
     id: "indigo-midnight",
@@ -406,6 +414,7 @@ export const PRESETS: StylePreset[] = [
     texture: "rays",
     rings: 3, petals: 16, bhupura: true, cornerMotifs: false, starField: 90,
     lineWeight: 1.2, displayFont: "serif", letterSpacing: 6, uppercase: true, dark: true,
+    artScrim: 0.66,
   },
   {
     id: "minimal-line",
@@ -419,6 +428,7 @@ export const PRESETS: StylePreset[] = [
     texture: "none",
     rings: 2, petals: 12, bhupura: false, cornerMotifs: true, starField: 0,
     lineWeight: 0.9, displayFont: "sans", letterSpacing: 2, uppercase: false, dark: false,
+    artScrim: 0.55,
   },
   {
     id: "dense-mandala",
@@ -432,6 +442,21 @@ export const PRESETS: StylePreset[] = [
     texture: "dots",
     rings: 6, petals: 32, bhupura: true, cornerMotifs: true, starField: 140,
     lineWeight: 1.1, displayFont: "serif", letterSpacing: 3, uppercase: true, dark: true,
+    artScrim: 0.70,
+  },
+  {
+    id: "royal-marigold",
+    name: "Royal Marigold",
+    blurb: "Oxblood-and-marigold showpiece — foil double frame, dense lotus mandala.",
+    bg: { from: "#3a0f14", via: "#5a1a12", to: "#12060a", angle: 100, vignette: "#000000" },
+    ink: () => "#ffeccc",
+    inkSoft: () => "#e0a878",
+    rule: (_c) => "#e0a838",
+    accentOpacity: 1,
+    texture: "rays",
+    rings: 5, petals: 28, bhupura: true, cornerMotifs: true, starField: 70,
+    lineWeight: 1.4, displayFont: "serif", letterSpacing: 5, uppercase: true, dark: true,
+    artScrim: 0.60,
   },
 ];
 

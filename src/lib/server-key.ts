@@ -25,7 +25,12 @@ function requireKey(name: string): string {
   return value.trim();
 }
 
-export const geminiKey = () => requireKey("GEMINI_API_KEY");
-export const nvidiaKey = () => requireKey("NVIDIA_API_KEY");
-export const openrouterKey = () => requireKey("OPENROUTER_API_KEY");
+/** BYOK: an optional per-request override wins over process.env; never persisted or logged. */
+export const geminiKey = (override?: string) =>
+  override && override.trim() ? override.trim() : requireKey("GEMINI_API_KEY");
+export const nvidiaKey = (override?: string) =>
+  override && override.trim() ? override.trim() : requireKey("NVIDIA_API_KEY");
+export const openrouterKey = (override?: string) =>
+  override && override.trim() ? override.trim() : requireKey("OPENROUTER_API_KEY");
+// Not in the active reading chain right now (no key configured). Kept for future use.
 export const baiduKey = () => requireKey("BAIDU_API_KEY");

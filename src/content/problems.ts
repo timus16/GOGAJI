@@ -592,6 +592,7 @@ export function chartFactSheet(
   // the condition pass is reused instead of running `assessChart()` a second
   // time. The parameter is optional, so `chartFactSheet(chart)` is unchanged.
   assessment?: BirthChartConditions,
+  focusAreas?: string[],
 ): { facts: Record<string, string>; text: string } {
   const nak = chart.moonNakshatra;
   const lagnaRashi = RASHIS[chart.lagna.signIndex];
@@ -615,7 +616,34 @@ export function chartFactSheet(
 
   // Reuse the caller's assessment when supplied so `assessChart` does not run
   // a second time per request; `chartFactSheet(chart)` still works unchanged.
-  const { conditions, positives } = assessment ?? assessChart(chart);
+  let { conditions, positives } = assessment ?? assessChart(chart);
+
+  if (focusAreas?.length) {
+    const AREA_OF: Record<string, LifeArea> = {
+      "harsh-saturn": "career",
+      "mangal-dosha": "relationships",
+      "afflicted-moon": "health",
+      "weak-lagna-lord": "health",
+      "retrograde-mercury": "education",
+      "rahu-ketu-emphasis": "spiritual",
+      "afflicted-venus": "relationships",
+      "afflicted-sun": "career",
+      "afflicted-jupiter": "education",
+      "malefics-in-angles": "career",
+      "strong-jupiter": "spiritual",
+      "exalted-benefic": "protection",
+      "own-sign-benefic": "wealth",
+      "favourable-moon-nakshatra": "health",
+      "strong-lagna-lord": "health",
+      "waxing-moon": "health",
+    };
+    const inFocus = (item: AstroCondition) => {
+      const area = AREA_OF[item.key];
+      return area !== undefined && focusAreas.includes(area);
+    };
+    conditions = [...conditions.filter(inFocus), ...conditions.filter((c) => !inFocus(c))];
+    positives = [...positives.filter(inFocus), ...positives.filter((p) => !inFocus(p))];
+  }
 
   const facts: Record<string, string> = {
     nakshatra: nak.name,
@@ -684,6 +712,7 @@ export function chartFactSheet(
   }
   let text = kept.join("\n");
   if (text.length > 1400) text = text.slice(0, 1400);
+  if (focusAreas?.length) text = `Querent focus: ${focusAreas.join(", ")}. ${text}`;
 
   return { facts, text };
 }

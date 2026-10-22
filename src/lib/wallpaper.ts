@@ -64,6 +64,8 @@ export interface WallpaperOptions {
   fontFaceCss?: string;
   /** exposed for the in-page preview */
   className?: string;
+  /** Optional AI-generated art data URL, drawn as the base layer (cover-fit). */
+  backgroundImageUrl?: string;
 }
 
 /* ------------------------------------------------------------------ motifs */
@@ -241,30 +243,57 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
   const upper = preset.uppercase ? (s: string) => s.toUpperCase() : (s: string) => s;
   const ls = preset.letterSpacing * (w / 1170);
 
+  /* ---- AI art base layer (frozen composite contract) ----------------------
+     `backgroundImageUrl` is a self-contained data URL; the guard rejects an
+     external URL, so the export through `svgToPngBlob` stays untainted. It is
+     drawn cover-fit as the FIRST element, and both `href` (SVG2) and
+     `xlink:href` (SVG1.1, and some rasterisers) are emitted so either loader
+     resolves the bitmap. */
+  const artUrl = o.backgroundImageUrl && o.backgroundImageUrl.startsWith("data:")
+    ? o.backgroundImageUrl : "";
+  const hasArt = artUrl.length > 0;
+  const scrimColour = preset.dark ? "#05060a" : "#f6efe1";
+  const art = hasArt
+    ? `<image x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice"
+        href="${esc(artUrl)}" xlink:href="${esc(artUrl)}"/>`
+    : "";
+  const artScrim = hasArt
+    ? `
+  <rect width="${w}" height="${h}" fill="${scrimColour}" opacity="${(preset.artScrim * 0.62).toFixed(3)}"/>
+  <rect width="${w}" height="${h}" fill="url(#artScrimCol)"/>`
+    : "";
+
   /* ---- mandala + yantra group, centred at (mx,my) */
   const mx = portrait ? w / 2 : w * 0.30;
   const my = portrait ? h * 0.335 : h * 0.50;
   const R = portrait ? Math.min(w * 0.44, h * 0.24) : Math.min(h * 0.42, w * 0.26);
 
+  /* Ornate mandala: ring weight and opacity vary by index, the outer ring is
+     stroked with the foil gradient on dark presets, and the petals sit in three
+     bands of different density so the disc reads as layered filigree. */
   let rings = "";
   for (let i = 0; i < preset.rings; i++) {
-    const rr = R * (1 - i * (0.115));
-    rings += `<circle cx="${mx}" cy="${my}" r="${rr.toFixed(2)}" fill="none" stroke="${i === 0 ? rule : soft}"
-      stroke-width="${(i === 0 ? sw * 1.5 : sw * 0.7).toFixed(2)}" opacity="${i === 0 ? 0.95 : 0.55}"/>`;
+    const rr = R * (1 - i * 0.115);
+    const outer = i === 0;
+    const op = outer ? 0.95 : Math.max(0.18, 0.62 - i * 0.085);
+    rings += `<circle cx="${mx}" cy="${my}" r="${rr.toFixed(2)}" fill="none"
+      stroke="${outer ? (preset.dark ? "url(#foil)" : rule) : (i % 2 ? soft : rule)}"
+      stroke-width="${(outer ? sw * 1.6 : sw * (i % 2 ? 0.5 : 0.8)).toFixed(2)}" opacity="${op.toFixed(2)}"/>`;
   }
-  const petalBand = `<g>${petals(mx, my, R * 0.60, R * 0.93, preset.petals, sw * 0.8, soft)}</g>`;
+  const petalBand = `<g opacity="0.86">${petals(mx, my, R * 0.60, R * 0.93, preset.petals, sw * 0.8, soft)}</g>`;
+  const petalBand1b = preset.rings >= 3
+    ? `<g opacity="0.48">${petals(mx, my, R * 0.46, R * 0.60, preset.petals, sw * 0.45, rule)}</g>` : "";
   const petalBand2 = preset.rings > 3
-    ? `<g>${petals(mx, my, R * 0.30, R * 0.54, Math.round(preset.petals / 2), sw * 0.7, soft)}</g>` : "";
+    ? `<g opacity="0.58">${petals(mx, my, R * 0.30, R * 0.54, Math.round(preset.petals / 2), sw * 0.7, soft)}</g>` : "";
   let dotsRing = "";
   if (preset.texture !== "none") {
     const n = preset.petals * 2;
     for (let i = 0; i < n; i++) {
       const a = (i * 360) / n * Math.PI / 180;
       dotsRing += `<circle cx="${(mx + Math.cos(a) * R * 1.045).toFixed(2)}" cy="${(my + Math.sin(a) * R * 1.045).toFixed(2)}"
-        r="${(sw * 1.5).toFixed(2)}" fill="${rule}" opacity="0.8"/>`;
+        r="${(sw * 1.5).toFixed(2)}" fill="${rule}" opacity="${(0.4 + (i % 3) * 0.2).toFixed(2)}"/>`;
     }
   }
-
   /* ---- the yantra itself: the ruling planet's magic square */
   const yantraSide = R * (portrait ? 1.12 : 1.15);
   const yx = mx - yantraSide / 2, yy = my - yantraSide / 2;
@@ -333,105 +362,126 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
     texture = rays;
   }
 
-  /* ---- frame */
+  /* ---- frame + delicate foil corner filigree */
   const pad = w * (portrait ? 0.055 : 0.035);
   const frame = `<rect x="${pad}" y="${pad}" width="${w - 2 * pad}" height="${h - 2 * pad}" fill="none"
-      stroke="${rule}" stroke-width="${sw * 1.6}"/>
+      stroke="${preset.dark ? "url(#foil)" : rule}" stroke-width="${sw * 1.6}"/>
+    <rect x="${pad * 1.06}" y="${pad * 1.06}" width="${w - 2.12 * pad}" height="${h - 2.12 * pad}" fill="none"
+      stroke="${rule}" stroke-width="${sw * 0.45}" opacity="0.55"/>
     <rect x="${pad * 1.35}" y="${pad * 1.35}" width="${w - 2.7 * pad}" height="${h - 2.7 * pad}" fill="none"
       stroke="${soft}" stroke-width="${sw * 0.6}" opacity="0.75"/>`;
 
-  /* ---- text blocks */
+  const filig = (() => {
+    const inset = pad * 2.1, a = w * 0.038;
+    const corners: [number, number, number, number][] = [
+      [inset, inset, 1, 1], [w - inset, inset, -1, 1],
+      [inset, h - inset, 1, -1], [w - inset, h - inset, -1, -1],
+    ];
+    return corners.map(([cx, cy, sx, sy]) => `<g transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
+      <path d="M0 ${(sy * a).toFixed(1)} L0 ${(sy * a * 0.35).toFixed(1)} Q0 0 ${(sx * a * 0.35).toFixed(1)} 0 L${(sx * a).toFixed(1)} 0"
+        fill="none" stroke="${rule}" stroke-width="${(sw * 0.7).toFixed(2)}" opacity="0.72" stroke-linecap="round"/>
+      <circle cx="${(sx * a * 1.16).toFixed(1)}" cy="${(sy * a * 1.16).toFixed(1)}" r="${(sw * 1.25).toFixed(2)}" fill="${rule}" opacity="0.7"/>
+      <circle cx="${(sx * a * 0.46).toFixed(1)}" cy="${(sy * a * 0.46).toFixed(1)}" r="${(sw * 0.75).toFixed(2)}" fill="${soft}" opacity="0.55"/>
+    </g>`).join("");
+  })();
+  /* ---- text blocks: name > Devanagari nakshatra > pada syllable > mantra >
+     footer, one explicit baseline per line with a generous gap, so nothing can
+     ever overprint or overflow. The translucent card behind the centre column,
+     the halos behind the name and the big Devanagari name, and the fitGlyphs /
+     wrapToWidth caps make it read as a designed poster at any frame size. */
   const fz = (f: number) => (f * w) / 1170;
-  /* The name is the widest Latin run in the composition, so it is capped with
-     fitGlyphs against the same width budget as the header: the centred column in
-     portrait, the free text column beside the mandala in landscape. A long name
-     therefore shrinks to fit instead of running off both edges of the frame. */
   const nameStr = upper(ch.input.name.trim() || "Your Name");
   const nameCap = portrait ? w - 2 * pad * 1.5 : w - pad * 1.6 - w * 0.56;
+  const nameSize = portrait ? fz(96) : fz(70);
   const nameText = portrait
-    ? { x: w / 2, y: pad + fz(150), size: fitGlyphs(fz(74), nameStr, nameCap, ls), anchor: "middle" }
-    : { x: w * 0.56, y: h * 0.16, size: fitGlyphs(fz(64), nameStr, nameCap, ls), anchor: "start" };
+    ? { x: w / 2, y: pad + fz(158), size: fitGlyphs(nameSize, nameStr, nameCap, ls), anchor: "middle" }
+    : { x: w * 0.56, y: h * 0.18, size: fitGlyphs(nameSize, nameStr, nameCap, ls), anchor: "start" };
   const name = esc(nameStr);
+  const nameCx = nameText.anchor === "middle"
+    ? nameText.x
+    : nameText.x + Math.min(nameCap, nameStr.length * GLYPH_EM * nameText.size) * 0.5;
+  const nameHalo = `<ellipse cx="${nameCx.toFixed(1)}" cy="${(nameText.y - nameText.size * 0.30).toFixed(1)}"
+    rx="${Math.min(nameCap * 0.46, nameText.size * Math.max(3, nameStr.length) * 0.42).toFixed(1)}"
+    ry="${(nameText.size * 0.88).toFixed(1)}" fill="url(#halo)" opacity="0.9"/>`;
 
   const place = `${esc(ch.input.place)}`;
   const birthLine = `${new Date(ch.utc.getTime() + ch.offsetMinutes * 60000).toISOString().slice(0, 10).split("-").reverse().join(" ")} · ${ch.input.time} · ${place}`;
 
   let body = "";
+  let cardTop = 0, cardBottom = 0, cardX0 = 0, cardX1 = 0;
   if (portrait) {
     const tx = w / 2;
     const fwFull = w - 2 * pad * 1.5;
-    /* The centre column is a fixed stack of baselines with an explicit gap
-       after every block (gaps in fz() units, 1 fz = 1 px at the 1170 master), so
-       the header rule line, the large Devanagari nakshatra name, the pada
-       syllable (moved off the header onto a row of its own), the
-       pada/deity/symbol caption, the bīja mantra (Devanagari + roman + gloss),
-       the kundli square and its footer lines can never overprint one another.
-       The Latin lines are additionally capped by fitGlyphs against fwFull, so a
-       long name, place or yantra note stays inside the frame. */
     const headStr = upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name);
     const padaStr = upper("PADA SYLLABLE " + nak.syllablesRoman[ch.moonPada - 1] + " · DEITY " + nak.deityRoman + " · SYMBOL " + nak.symbol);
+    const devSize = fz(82);
     let y = my + R + fz(96);
-    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(30), headStr, fwFull, ls)}" text-anchor="middle"
+    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(28), headStr, fwFull, ls)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls}">${esc(headStr)}</text>`;
-    y += fz(114);
-    body += `<text x="${tx}" y="${y}" fill="${c.glow}" font-size="${fz(90)}" text-anchor="middle"
+    y += fz(112);
+    const devRx = Math.min(nak.devanagari.length * devSize * 0.42, fwFull * 0.55);
+    body += `<ellipse cx="${tx}" cy="${(y - devSize * 0.30).toFixed(1)}" rx="${devRx.toFixed(1)}" ry="${(devSize * 0.95).toFixed(1)}" fill="url(#halo)"/>`;
+    body += `<text x="${tx}" y="${y}" fill="${c.glow}" font-size="${devSize}" text-anchor="middle"
       font-family="${dev}">${esc(nak.devanagari)}</text>`;
-    y += fz(78);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(52)}" text-anchor="middle"
+    y += fz(92);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(48)}" text-anchor="middle"
       font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
-    y += fz(48);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(24), padaStr, fwFull, ls * 0.8)}" text-anchor="middle"
+    y += fz(54);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), padaStr, fwFull, ls * 0.8)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls * 0.8}">${esc(padaStr)}</text>`;
-    y += fz(70);
-    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(52)}" text-anchor="middle"
+    y += fz(72);
+    body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(44)}" text-anchor="middle"
       font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
-    y += fz(46);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(27), g.mantra.roman, fwFull)}" text-anchor="middle"
+    y += fz(50);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(26), g.mantra.roman, fwFull)}" text-anchor="middle"
       font-family="${dev}">${esc(g.mantra.roman)}</text>`;
-    y += fz(32);
-    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(21), g.mantra.gloss, fwFull)}" text-anchor="middle"
+    y += fz(38);
+    body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(20), g.mantra.gloss, fwFull)}" text-anchor="middle"
       font-family="${dev}" opacity="0.85">${esc(g.mantra.gloss)}</text>`;
 
-    // kundli square, then a properly spaced footer. The square is bounded on
-    // both axes so it always clears the inner frame and the footer lines below.
-    const S = Math.min(w * 0.58, h * 0.166);
-    const kundliTop = y + fz(50);
+    const footBudget = fz(112);
+    const kundliTop = y + fz(52);
+    const S = Math.max(fz(120), Math.min(w * 0.56, h * 0.166, h - pad * 1.35 - footBudget - kundliTop));
     body += kundli(ch, w / 2 - S / 2, kundliTop, S, rule, soft, sw);
     const lagnaTail = `LAGNA ${rashiOf(ch.lagna.signIndex).name} ${dms(ch.lagna.degreeInSign)} · RULING PLANET ${g.name}`;
     const note = upper(g.yantraNote);
-    let fy = kundliTop + S + fz(40);
+    let fy = kundliTop + S + fz(36);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fwFull, ls * 0.7)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls * 0.7}">${esc(upper(birthLine))}</text>`;
-    fy += fz(30);
+    fy += fz(28);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(19), lagnaTail, fwFull, ls * 0.5)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
-    fy += fz(28);
+    fy += fz(26);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(17), note, fwFull, ls * 0.4)}" text-anchor="middle"
       font-family="${display}" letter-spacing="${ls * 0.4}" opacity="0.8">${esc(note)}</text>`;
+
+    cardX0 = pad * 1.35; cardX1 = w - pad * 1.35;
+    cardTop = Math.max(nameText.y - nameText.size * 1.15, pad * 1.35);
+    cardBottom = fy + fz(18);
   } else {
     const x0 = w * 0.56, right = w - pad * 1.6;
     const fwCol = right - x0;
-    /* Same discipline as portrait: one baseline per block, the pada syllable on
-       its own row, and a kundli sized from the remaining height so it finishes
-       inside the inner frame, with the footer notes in the free column beside
-       it. The Latin runs are capped by fitGlyphs against fwCol. */
     const headStr = upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name);
-    let y = h * 0.225;
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(30), headStr, fwCol, ls * 0.6)}" font-family="${display}"
+    const devSize = fz(66);
+    let y = h * 0.235;
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(28), headStr, fwCol, ls * 0.6)}" font-family="${display}"
       letter-spacing="${ls * 0.6}">${esc(headStr)}</text>`;
-    y += fz(90);
-    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${fz(78)}" font-family="${dev}">${esc(nak.devanagari)}</text>`;
-    y += fz(58);
-    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(38)}" font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
-    body += `<text x="${x0 + fz(50)}" y="${y - fz(4)}" fill="${soft}" font-size="${fz(21)}" font-family="${display}" letter-spacing="${ls * 0.6}">${esc(upper(nak.syllablesRoman[ch.moonPada - 1] + " · " + nak.deityRoman))}</text>`;
-    y += fz(50);
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(34)}" font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
-    y += fz(36);
+    y += fz(92);
+    const devRx = Math.min(nak.devanagari.length * devSize * 0.42, fwCol * 0.7);
+    body += `<ellipse cx="${(x0 + devRx * 0.5).toFixed(1)}" cy="${(y - devSize * 0.30).toFixed(1)}" rx="${devRx.toFixed(1)}" ry="${(devSize * 0.95).toFixed(1)}" fill="url(#halo)"/>`;
+    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${devSize}" font-family="${dev}">${esc(nak.devanagari)}</text>`;
+    y += fz(80);
+    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(36)}" font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
+    const padaCap = upper(nak.syllablesRoman[ch.moonPada - 1] + " · " + nak.deityRoman);
+    body += `<text x="${x0 + fz(50)}" y="${y - fz(4)}" fill="${soft}" font-size="${fitGlyphs(fz(21), padaCap, fwCol - fz(58), ls * 0.6)}" font-family="${display}"
+      letter-spacing="${ls * 0.6}">${esc(padaCap)}</text>`;
+    y += fz(52);
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(32)}" font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
+    y += fz(44);
     body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), g.mantra.roman, fwCol)}" font-family="${dev}">${esc(g.mantra.roman)}</text>`;
-    y += fz(34);
-    // kundli fills the height left above the inner frame; footer to its right.
+    y += fz(30);
     const kundliTop = y;
-    const S = Math.min(fwCol * 0.46, h - pad * 1.35 - kundliTop - fz(16), h * 0.36);
+    const S = Math.max(fz(120), Math.min(fwCol * 0.46, h - pad * 1.35 - kundliTop - fz(16), h * 0.36));
     body += kundli(ch, x0, kundliTop, S, rule, soft, sw);
     const fx = x0 + S + fz(40);
     const fw = right - fx;
@@ -440,57 +490,95 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
       letter-spacing="${ls * 0.6}">${esc(upper(birthLine))}</text>`;
     body += `<text x="${fx}" y="${kundliTop + fz(78)}" fill="${soft}" font-size="${fitGlyphs(fz(20), lagnaTail, fw, ls * 0.5)}" font-family="${display}"
       letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
-    /* The yantra note is the longest run in the composition (the Rahu and Ketu
-       notes are two sentences); it word-wraps into the free column beside the
-       kundli, one fitted line per row, so it can never pass the frame. */
     const noteLines = wrapToWidth(fz(9), upper(g.yantraNote), fw);
     let ny = kundliTop + fz(112);
     for (const ln of noteLines) {
       body += `<text x="${fx}" y="${ny}" fill="${soft}" font-size="${fitGlyphs(fz(17), ln, fw)}" font-family="${display}"
         opacity="0.8">${esc(ln)}</text>`;
-      ny += fz(20);
+      ny += fz(18);
     }
+    cardX0 = x0 - fz(30); cardX1 = right + fz(18);
+    cardTop = Math.max(nameText.y - nameText.size * 1.15, pad * 1.35);
+    cardBottom = Math.max(kundliTop + S + fz(20), ny);
   }
 
+  const cardRx = w * 0.022;
+  const cardW = Math.max(0, cardX1 - cardX0);
+  const cardH = Math.max(0, cardBottom - cardTop);
+  const card = cardW > 0 && cardH > 0
+    ? `<rect x="${cardX0.toFixed(1)}" y="${cardTop.toFixed(1)}" width="${cardW.toFixed(1)}" height="${cardH.toFixed(1)}"
+        rx="${cardRx.toFixed(1)}" ry="${cardRx.toFixed(1)}" fill="${preset.dark ? "#000000" : "#ffffff"}" opacity="${preset.dark ? 0.22 : 0.28}"/>
+      <rect x="${cardX0.toFixed(1)}" y="${cardTop.toFixed(1)}" width="${cardW.toFixed(1)}" height="${cardH.toFixed(1)}"
+        rx="${cardRx.toFixed(1)}" ry="${cardRx.toFixed(1)}" fill="none" stroke="${rule}" stroke-width="${(sw * 0.6).toFixed(2)}" opacity="0.5"/>`
+    : "";
 const cornerMotifs = preset.cornerMotifs
     ? [[pad * 2.1, pad * 2.1], [w - pad * 2.1, pad * 2.1], [pad * 2.1, h - pad * 2.1], [w - pad * 2.1, h - pad * 2.1]]
       .map(([cx, cy]) => `<g transform="translate(${cx} ${cy}) scale(${(w * 0.052).toFixed(1)})" color="${rule}" stroke="${rule}">${motifShape("lotus", (sw * 1.4) / (w * 0.052))}</g>`)
       .join("") : "";
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="${o.className ?? ""}">
+  const xlinkNs = hasArt ? ` xmlns:xlink="http://www.w3.org/1999/xlink"` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg"${xlinkNs} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="${o.className ?? ""}">
   <defs>
     <style>${o.fontFaceCss ?? ""}</style>
     <linearGradient id="bg" gradientTransform="rotate(${preset.bg.angle - 90} 0.5 0.5)">
       <stop offset="0%" stop-color="${preset.bg.from}"/>
-      <stop offset="55%" stop-color="${preset.bg.via}"/>
+      <stop offset="45%" stop-color="${preset.bg.via}"/>
       <stop offset="100%" stop-color="${preset.bg.to}"/>
     </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
-      <stop offset="0%" stop-color="${c.accent}" stop-opacity="${preset.dark ? 0.30 : 0.20}"/>
+    <radialGradient id="aurora" cx="28%" cy="16%" r="86%">
+      <stop offset="0%" stop-color="${c.accent}" stop-opacity="${preset.dark ? 0.26 : 0.14}"/>
+      <stop offset="46%" stop-color="${c.accent}" stop-opacity="${preset.dark ? 0.08 : 0.05}"/>
       <stop offset="100%" stop-color="${c.accent}" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="${c.accent}" stop-opacity="${preset.dark ? 0.30 : 0.20}"/>
+      <stop offset="60%" stop-color="${c.accent}" stop-opacity="${preset.dark ? 0.10 : 0.06}"/>
+      <stop offset="100%" stop-color="${c.accent}" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="${c.glow}" stop-opacity="${preset.dark ? 0.50 : 0.34}"/>
+      <stop offset="45%" stop-color="${c.glow}" stop-opacity="${preset.dark ? 0.20 : 0.12}"/>
+      <stop offset="100%" stop-color="${c.glow}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="foil" gradientTransform="rotate(38 0.5 0.5)">
+      <stop offset="0%" stop-color="${rule}" stop-opacity="0.85"/>
+      <stop offset="30%" stop-color="${c.glow}" stop-opacity="1"/>
+      <stop offset="55%" stop-color="${rule}" stop-opacity="0.7"/>
+      <stop offset="80%" stop-color="${c.glow}" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="${rule}" stop-opacity="0.8"/>
+    </linearGradient>
     <radialGradient id="vig" cx="50%" cy="45%" r="78%">
-      <stop offset="60%" stop-color="${preset.bg.vignette}" stop-opacity="0"/>
-      <stop offset="100%" stop-color="${preset.bg.vignette}" stop-opacity="${preset.dark ? 0.55 : 0.18}"/>
+      <stop offset="58%" stop-color="${preset.bg.vignette}" stop-opacity="0"/>
+      <stop offset="100%" stop-color="${preset.bg.vignette}" stop-opacity="${preset.dark ? 0.6 : 0.2}"/>
+    </radialGradient>
+    <radialGradient id="artScrimCol" cx="${portrait ? "50%" : "80%"}" cy="${portrait ? "68%" : "58%"}" r="${portrait ? "62%" : "46%"}">
+      <stop offset="0%" stop-color="${scrimColour}" stop-opacity="${preset.artScrim}"/>
+      <stop offset="55%" stop-color="${scrimColour}" stop-opacity="${(preset.artScrim * 0.6).toFixed(3)}"/>
+      <stop offset="100%" stop-color="${scrimColour}" stop-opacity="0"/>
     </radialGradient>
     <filter id="grain" x="0" y="0" width="100%" height="100%">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
       <feColorMatrix type="saturate" values="0"/>
     </filter>
   </defs>
-  <rect width="${w}" height="${h}" fill="url(#bg)"/>
+  ${art}${artScrim}${hasArt ? "" : `<rect width="${w}" height="${h}" fill="url(#bg)"/>`}
+  <rect width="${w}" height="${h}" fill="url(#aurora)"/>
   <rect width="${w}" height="${h}" fill="url(#glow)"/>
   ${stars}
   ${texture}
+  ${card}
   ${frame}
+  ${filig}
   ${cornerMotifs}
   ${rings}
   ${preset.bhupura ? bhupura(mx, my, R * 1.02, sw, soft) : ""}
   ${petalBand}
+  ${petalBand1b}
   ${petalBand2}
   ${dotsRing}
   ${yantra}
   ${motif}
+  ${nameHalo}
   <text x="${nameText.x}" y="${nameText.y}" fill="${ink}" font-size="${nameText.size}" text-anchor="${nameText.anchor}"
     font-family="${display}" letter-spacing="${ls}" font-weight="600">${name}</text>
   ${body}

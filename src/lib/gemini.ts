@@ -14,7 +14,6 @@
 
 import { geminiKey } from "~/lib/server-key";
 import { openrouterReading } from "~/lib/openrouter";
-import { baiduReading } from "~/lib/baidu";
 import { LIFE_AREAS } from "~/content/problems";
 
 /** One remedy: a practice, its mantra in both scripts, its deity and its day. */
@@ -68,9 +67,13 @@ const GEMINI_TIMEOUT_MS = 45_000;
  * identical instructions no matter which one answers. Keep it tight — this is
  * the single biggest token cost in the request.
  */
-export function buildReadingPrompt(chartSummary: string): string {
+export function buildReadingPrompt(chartSummary: string, focusAreas?: string[]): string {
+  const focusLine =
+    focusAreas && focusAreas.length
+      ? `\nQUERENT'S STATED FOCUS: ${focusAreas.join(", ")}. Weight the interpretation and the remedies toward these areas without ignoring contraindications.\n`
+      : "";
   return `You are a learned Vedic astrologer and a devotional guide. Reason ONLY from the chart facts supplied below: never calculate, recall or invent a planetary position, a sign, a nakshatra or a deity that is not written in the facts.
-
+${focusLine}
 CHART FACTS (the only source of truth):
 ${chartSummary}
 
@@ -246,8 +249,8 @@ export function isUsableReading(reading: Reading | null): reading is Reading {
  * Gemini: one real HTTP call to the Generative Language API. No stubbing, no
  * simulated answers — if the call fails, the error travels up the chain.
  */
-export async function geminiReading(chartSummary: string): Promise<Reading> {
-  const key = geminiKey();
+export async function geminiReading(chartSummary: string, keyOverride?: string): Promise<Reading> {
+  const key = geminiKey(keyOverride);
   const prompt = buildReadingPrompt(chartSummary);
 
   const res = await fetch(GEMINI_ENDPOINT, {
@@ -339,6 +342,7 @@ function cacheReading(
  */
 export async function readKundli(
   chartSummary: string,
+  keyOverrides?: { gemini?: string; openrouter?: string },
 ): Promise<{ reading: Reading; provider: ReadingProvider }> {
   const cached = readCachedReading(chartSummary);
   if (cached) return cached;
@@ -346,7 +350,7 @@ export async function readKundli(
   const failures: string[] = [];
 
   try {
-    const reading = await geminiReading(chartSummary);
+    const reading = await geminiReading(chartSummary, keyOverrides?.gemini);
     cacheReading(chartSummary, reading, "gemini");
     return { reading, provider: "gemini" };
   } catch (err) {
@@ -354,20 +358,13 @@ export async function readKundli(
   }
 
   try {
-    const reading = await openrouterReading(chartSummary);
+    const reading = await openrouterReading(chartSummary, keyOverrides?.openrouter);
     cacheReading(chartSummary, reading, "openrouter");
     return { reading, provider: "openrouter" };
   } catch (err) {
     failures.push(`openrouter: ${errorMessage(err)}`);
   }
 
-  try {
-    const reading = await baiduReading(chartSummary);
-    cacheReading(chartSummary, reading, "baidu");
-    return { reading, provider: "baidu" };
-  } catch (err) {
-    failures.push(`baidu: ${errorMessage(err)}`);
-  }
-
+// Baidu provider exists in src/lib/baidu.ts but is not in the active chain — re-add here when BAIDU_API_KEY is configured.
   throw new Error(`No reading provider could answer — ${failures.join(" | ")}`);
 }

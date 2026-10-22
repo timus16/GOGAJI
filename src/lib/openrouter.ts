@@ -115,8 +115,8 @@ async function chatCompletion(
  * Ask OpenRouter for a reading. Tries the free models in order (at most
  * three) and returns the first reading that survives validation.
  */
-export async function openrouterReading(chartSummary: string): Promise<Reading> {
-  const key = openrouterKey();
+export async function openrouterReading(chartSummary: string, keyOverride?: string): Promise<Reading> {
+  const key = openrouterKey(keyOverride);
   const prompt = buildReadingPrompt(chartSummary);
 
   const failures: string[] = [];

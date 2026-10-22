@@ -25,8 +25,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequestIP } from "@tanstack/react-start/server";
 import { computeChart, type BirthInput } from "~/lib/astro";
 import { assessChart, chartFactSheet, type BirthChartConditions } from "~/content/problems";
+import { presetById } from "~/content/vedic-mapping";
 import { errorMessage, readKundli, type Reading, type ReadingProvider } from "~/lib/gemini";
-import { nvidiaWallpaper, promptFromBrief } from "~/lib/nvidia";
+import { nvidiaWallpaper, promptFromBrief, wallpaperSeed } from "~/lib/nvidia";
 
 // `ReadingProvider` is defined once, in the reading layer, and re-exported here
 // so existing importers of this module keep working. `Reading` is re-exported
@@ -34,6 +35,13 @@ import { nvidiaWallpaper, promptFromBrief } from "~/lib/nvidia";
 export type { Reading, ReadingProvider } from "~/lib/gemini";
 export type { BirthInput } from "~/lib/astro";
 export type { BirthChartConditions } from "~/content/problems";
+
+/**
+ * The accepted request body: the birth input plus the OPTIONAL style preset id
+ * the client may send. `presetId` is optional, so a client that omits it keeps
+ * the exact previous, chart-only behaviour.
+ */
+export type WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[]; keys?: { gemini?: string; openrouter?: string; nvidia?: string } };
 
 /** The fact sheet the model was given - the chart, in flat text. */
 export interface ChartSummary {
@@ -196,8 +204,13 @@ function rateLimitedResponse(data: BirthInput, error: string): WallpaperResponse
 /**
  * The handler body, kept as a plain exported function so it can be exercised
  * directly (and so the server function is a thin wrapper around it).
+ *
+ * `data.presetId`, when present, selects the user's wallpaper style; it is
+ * resolved with `presetById()` and folded into the art prompt. The art is made
+ * per-user by a stable seed hashed from the chart identity, so the same chart
+ * always reproduces the same image.
  */
-export async function buildWallpaperResponse(data: BirthInput): Promise<WallpaperResponse> {
+export async function buildWallpaperResponse(data: WallpaperRequest): Promise<WallpaperResponse> {
     const errors: string[] = [];
 
     try {
@@ -208,7 +221,7 @@ export async function buildWallpaperResponse(data: BirthInput): Promise<Wallpape
       //    the fact sheet (its second argument) so `assessChart` does not run a
       //    second time inside `chartFactSheet`.
       const conditions = assessChart(chart);
-      const sheet = chartFactSheet(chart, conditions);
+      const sheet = chartFactSheet(chart, conditions, data.focusAreas);
 
       // 3. The reading. A failure here must not sink the whole request. The
       //    whole chain is raced against the reading budget so a slow provider
@@ -216,7 +229,7 @@ export async function buildWallpaperResponse(data: BirthInput): Promise<Wallpape
       let reading: Reading | null = null;
       let provider: ReadingProvider | undefined;
       try {
-        const result = await withTimeout(readKundli(sheet.text), AI_READING_BUDGET_MS, "Reading");
+        const result = await withTimeout(readKundli(sheet.text, data.keys), AI_READING_BUDGET_MS, "Reading");
         reading = result.reading;
         provider = result.provider;
       } catch (err) {
@@ -228,12 +241,24 @@ export async function buildWallpaperResponse(data: BirthInput): Promise<Wallpape
       // 4. The artwork, strictly AFTER the reading (never concurrently) because
       //    the art prompt prefers the reading's wallpaper brief and only falls
       //    back to chart facts when the reading is missing.
+      //
+      //    Two things make the art FRESH PER USER. First, a stable per-user
+      //    SEED hashed from the chart identity (name, date, time, place): the
+      //    same person reproduces the same painting, a different person gets a
+      //    different one. Second, the prompt folds in the nakshatra, the lagna,
+      //    the ruling planet's classical colours and the chart's conditions.
+      //    The chosen style preset, when the client sends one, is resolved here
+      //    and folded into the prompt so the art matches the user's style.
+      const seed = wallpaperSeed(data);
+      const preset = data.presetId && data.presetId.trim() ? presetById(data.presetId) : null;
+      const promptOpts = { facts: sheet.facts, preset, focusAreas: data.focusAreas };
+
       let wallpaperPrompt = "";
       let image: WallpaperResponse["image"];
       try {
-        wallpaperPrompt = promptFromBrief(reading, sheet.text);
+        wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
         const painted = await withTimeout(
-          nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216 }),
+          nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216, seed, keyOverride: data.keys?.nvidia }),
           AI_IMAGE_BUDGET_MS,
           "Wallpaper",
         );
@@ -249,7 +274,7 @@ export async function buildWallpaperResponse(data: BirthInput): Promise<Wallpape
         errors.push(`Wallpaper unavailable: ${errorMessage(err)}`);
         if (!wallpaperPrompt) {
           try {
-            wallpaperPrompt = promptFromBrief(reading, sheet.text);
+            wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
           } catch {
             wallpaperPrompt = "";
           }
@@ -281,7 +306,7 @@ export async function buildWallpaperResponse(data: BirthInput): Promise<Wallpape
 }
 
 export const generateWallpaper = createServerFn({ method: "POST" })
-  .validator((d: BirthInput) => d)
+  .validator((d: WallpaperRequest) => d)
   .handler(async ({ data }): Promise<WallpaperResponse> => {
     // The paid-provider gate. Checked first, before any provider is touched;
     // when it trips we return the normal response shape with an explanatory

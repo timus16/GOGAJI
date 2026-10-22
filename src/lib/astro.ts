@@ -32,7 +32,11 @@ export interface BirthInput {
   name: string;
   /** local wall-clock date, "YYYY-MM-DD" */
   date: string;
-  /** local wall-clock time, "HH:MM" */
+  /**
+   * local wall-clock time. "HH:MM", or "HH:MM:SS" when seconds are supplied; a
+   * missing seconds field is read as :00, so the pre-seconds "HH:MM" form keeps
+   * behaving exactly as it did.
+   */
   time: string;
   place: string;
   latitude: number;
@@ -102,8 +106,11 @@ export function zoneOffsetMinutes(timeZone: string, at: Date): number {
  */
 export function localToUtc(date: string, time: string, timeZone: string): { utc: Date; offsetMinutes: number } {
   const [y, m, d] = date.split("-").map(Number);
-  const [hh, mm] = time.split(":").map(Number);
-  const naive = Date.UTC(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+  // Seconds are optional: "HH:MM" parses to ss = undefined -> 0, while
+  // "HH:MM:SS" carries the real second into the epoch. Everything past this
+  // point is unchanged, so the "HH:MM" path is bit-for-bit identical.
+  const [hh, mm, ss] = time.split(":").map(Number);
+  const naive = Date.UTC(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, ss || 0);
   let offset = zoneOffsetMinutes(timeZone, new Date(naive));
   let utc = naive - offset * 60000;
   const offset2 = zoneOffsetMinutes(timeZone, new Date(utc));
@@ -365,3 +372,130 @@ export const formatOffset = (min: number) => {
   const a = Math.abs(min);
   return `UTC${s}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
 };
+
+/* ---------------------------------------------------------------- panchang */
+
+function siderealSunMoon(utc: Date): { sun: number; moon: number } {
+  const jd = jdFromDate(utc);
+  const ayan = lahiriAyanamsa(jd);
+  return {
+    sun: norm360(sunLongitude(jd) - ayan),
+    moon: norm360(moonLongitude(jd) - ayan),
+  };
+}
+
+const TITHI_NAMES = [
+  "Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī", "Pañcamī", "Ṣaṣṭhī",
+  "Saptamī", "Aṣṭamī", "Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
+  "Trayodaśī", "Caturdaśī", "Pūrṇimā",
+  "Pratipadā", "Dvitīyā", "Tṛtīyā", "Caturthī", "Pañcamī", "Ṣaṣṭhī",
+  "Saptamī", "Aṣṭamī", "Navamī", "Daśamī", "Ekādaśī", "Dvādaśī",
+  "Trayodaśī", "Caturdaśī", "Amāvasyā",
+];
+const YOGA_NAMES = [
+  "Viṣkambhā", "Prīti", "Āyuṣmat", "Saubhāgya", "Śobhana", "Atigaṇḍa",
+  "Sukarmā", "Dhṛti", "Śūla", "Gaṇḍa", "Vṛddhi", "Dhruva", "Vyāghāta",
+  "Harṣaṇa", "Vajra", "Siddhi", "Vyatīpāta", "Varīyas", "Parigha", "Śiva",
+  "Siddha", "Sādhya", "Śubha", "Śukla", "Brahma", "Indra", "Vaidhṛti",
+];
+const KARANA_CYCLE = ["Bava", "Bālava", "Kaulava", "Taitila", "Gara", "Vaṇija", "Vishti"];
+const KARANA_FIXED = ["Ṣakunī", "Nāga", "Catuṣpada"];
+const VARA_NAMES = ["Ravivāra", "Somavāra", "Maṅgalavāra", "Budhavāra", "Guruvāra", "Śukravāra", "Śanivāra"];
+const LUNAR_MONTHS = [
+  "Chaitra", "Vaiśākha", "Jyeṣṭha", "Āṣāḍha", "Śrāvaṇa", "Bhādrapada",
+  "Āśvina", "Kārttika", "Mārgaśīrṣa", "Pauṣa", "Māgha", "Phālguna",
+];
+
+export interface Panchang {
+  tithiIndex: number; tithiName: string; paksha: "Śukla" | "Kṛṣṇa";
+  varaIndex: number; varaName: string;
+  yogaIndex: number; yogaName: string;
+  karanaName: string;
+  lunarMonth: { amantaIndex: number; amantaName: string; purnimantaIndex: number; purnimantaName: string };
+  samvat: { shaka: number; vikram: number };
+  provisionalNotes: string[];
+}
+
+export function computePanchang(utc: Date, offsetMinutes: number): Panchang {
+  const { sun, moon } = siderealSunMoon(utc);
+  const elong = norm360(moon - sun);
+  const tithiIndex = Math.floor(elong / 12);
+  const paksha: "Śukla" | "Kṛṣṇa" = tithiIndex < 15 ? "Śukla" : "Kṛṣṇa";
+  const yogaIndex = Math.floor(norm360(sun + moon) / (360 / 27));
+  const karanaIndex = Math.floor(elong / 6);
+  const karanaName = karanaIndex === 0 ? "Kimstughnā"
+    : karanaIndex >= 57 ? KARANA_FIXED[karanaIndex - 57]
+    : KARANA_CYCLE[(karanaIndex - 1) % 7];
+  const local = new Date(utc.getTime() + offsetMinutes * 60000);
+  const varaIndex = local.getUTCDay();
+  const elapsedDays = elong / 12.19; // days since last new moon (combined motion ≈12.19°/day)
+  const sunAtNewMoon = norm360(sun - elapsedDays * 0.9856); // sun's daily motion ≈0.9856°/day
+  const amantaIndex = (Math.floor(sunAtNewMoon / 30) + 1) % 12; // Chaitra..Phālguna
+  const purnimantaIndex = (amantaIndex + (tithiIndex >= 15 ? 1 : 0)) % 12;
+  const year = local.getUTCFullYear();
+  return {
+    tithiIndex,
+    tithiName: TITHI_NAMES[tithiIndex],
+    paksha,
+    varaIndex,
+    varaName: VARA_NAMES[varaIndex],
+    yogaIndex,
+    yogaName: YOGA_NAMES[yogaIndex],
+    karanaName,
+    lunarMonth: {
+      amantaIndex,
+      amantaName: LUNAR_MONTHS[amantaIndex],
+      purnimantaIndex,
+      purnimantaName: LUNAR_MONTHS[purnimantaIndex],
+    },
+    samvat: { shaka: year - 78, vikram: year + 57 },
+    provisionalNotes: [
+      "civil-midnight boundary; sunrise-based vāra not yet implemented (PROVISIONAL)",
+      "lunar-month naming uses mean-motion approximation (12.19°/day combined moon–sun elongation, 0.9856°/day solar motion); precise saṅkrānti/new-moon boundaries not tracked (PROVISIONAL)",
+      "śaka/vikrama approximate to the new-year boundary",
+    ],
+  };
+}
+
+export interface DashaPeriod { lord: string; lordDevanagari: string; start: Date; end: Date; years: number; }
+
+const DASHA_ORDER: { key: PlanetKey; lord: string; deva: string; years: number }[] = [
+  { key: "ketu", lord: "Ketu", deva: "केतु", years: 7 },
+  { key: "venus", lord: "Śukra", deva: "शुक्र", years: 20 },
+  { key: "sun", lord: "Sūrya", deva: "सूर्य", years: 6 },
+  { key: "moon", lord: "Candra", deva: "चन्द्र", years: 10 },
+  { key: "mars", lord: "Maṅgala", deva: "मंगल", years: 7 },
+  { key: "rahu", lord: "Rāhu", deva: "राहु", years: 18 },
+  { key: "jupiter", lord: "Guru", deva: "गुरु", years: 16 },
+  { key: "saturn", lord: "Śani", deva: "शनि", years: 19 },
+  { key: "mercury", lord: "Budha", deva: "बुध", years: 17 },
+];
+
+export function vimshottariDasha(chart: Chart, count = 9) {
+  const startIdx = Math.max(0, DASHA_ORDER.findIndex((d) => d.key === chart.moonNakshatra.lord));
+  const start = DASHA_ORDER[startIdx];
+  const fraction = (chart.moon.longitude % NAK_SPAN) / NAK_SPAN;
+  const yearsLeft = (1 - fraction) * start.years;
+  const YEAR_MS = 365.25 * 86400000;
+  const periods: DashaPeriod[] = [];
+  let cursor = chart.utc.getTime();
+  periods.push({
+    lord: start.lord, lordDevanagari: start.deva,
+    start: new Date(cursor), end: new Date(cursor + yearsLeft * YEAR_MS), years: yearsLeft,
+  });
+  cursor += yearsLeft * YEAR_MS;
+  const n = Math.min(Math.max(count, 0), 9);
+  for (let i = 1; i < n; i++) {
+    const d = DASHA_ORDER[(startIdx + i) % 9];
+    periods.push({
+      lord: d.lord, lordDevanagari: d.deva,
+      start: new Date(cursor), end: new Date(cursor + d.years * YEAR_MS), years: d.years,
+    });
+    cursor += d.years * YEAR_MS;
+  }
+  return {
+    balance: { lord: start.lord, lordDevanagari: start.deva, yearsLeft },
+    periods,
+    provisionalNotes: ["dates use mean solar years, not precise daśā-panchaka (PROVISIONAL)"],
+  };
+}

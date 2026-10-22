@@ -8,14 +8,48 @@
  */
 
 import { nvidiaKey } from "~/lib/server-key";
-import { GRAHAS } from "~/content/vedic-mapping";
+import { GRAHAS, type StylePreset } from "~/content/vedic-mapping";
 import type { Reading } from "~/lib/gemini";
+import type { BirthInput } from "~/lib/astro";
 
 const NVIDIA_ENDPOINT = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev";
 const NVIDIA_TIMEOUT_MS = 60_000;
 const DEFAULT_WIDTH = 832;
 const DEFAULT_HEIGHT = 1216;
 const DEFAULT_SEED = 42;
+
+/**
+ * A STABLE per-user seed derived from the chart identity.
+ *
+ * The same person must reproduce the SAME artwork, so a re-open is not a new
+ * roll of the dice; a DIFFERENT person must get DIFFERENT artwork. The seed is
+ * therefore a pure hash of the identity fields the user supplied - name, date,
+ * time and place - and nothing else. It is deliberately independent of the
+ * reading (which can change between calls) and of the prompt wording, so the
+ * seed is reproducible even when a provider answers differently.
+ *
+ * FNV-1a (32-bit) over a normalised identity string: tiny, dependency-free and
+ * stable across runs and processes (unlike `Math.random` or a per-request key).
+ * The result is folded into a positive, non-zero signed-32-bit range: FLUX
+ * treats seed 0 as "pick a random seed", so 0 collapses to DEFAULT_SEED.
+ */
+export function wallpaperSeed(
+  input: Pick<BirthInput, "name" | "date" | "time" | "place">,
+): number {
+  const identity = [input.name, input.date, input.time, input.place]
+    .map((s) => (s ?? "").trim().toLowerCase())
+    .join("|")
+    .replace(/\s+/g, " ");
+
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < identity.length; i++) {
+    hash ^= identity.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  const seed = (hash >>> 0) % 2147483647;
+  return seed > 0 ? seed : DEFAULT_SEED;
+}
 
 /** The result of one image call. */
 export interface WallpaperImage {
@@ -132,9 +166,9 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
  */
 export async function nvidiaWallpaper(
   prompt: string,
-  opts?: { width?: number; height?: number; seed?: number },
+  opts?: { width?: number; height?: number; seed?: number; keyOverride?: string },
 ): Promise<WallpaperImage> {
-  const key = nvidiaKey();
+  const key = nvidiaKey(opts?.keyOverride);
   const width = opts?.width ?? DEFAULT_WIDTH;
   const height = opts?.height ?? DEFAULT_HEIGHT;
   const seed = opts?.seed ?? DEFAULT_SEED;
@@ -213,7 +247,7 @@ export async function nvidiaWallpaper(
  * the model must not paint any lettering of its own.
  */
 const NO_TEXT_CLAUSE =
-  "Symmetrical mandala composition, deep shadows, soft volumetric light, no readable text, no watermark, no lettering, no caption, no frame, no border.";
+  "Symmetrical mandala composition, deep shadows, soft volumetric light, no readable text, no letters, no watermark, no lettering, no caption, no frame, no border.";
 
 /** Keep a prompt under a word budget without cutting mid-word. */
 function clampWords(text: string, maxWords: number): string {
@@ -223,25 +257,59 @@ function clampWords(text: string, maxWords: number): string {
 }
 
 /**
+ * The pre-built, per-user inputs the prompt builder can use.
+ *
+ * `facts` is the STRUCTURED fact sheet (`ChartSummary.facts`), so the chart's
+ * values are read by key rather than by scraping the prose; `preset` is the
+ * user's chosen style archetype, resolved from `presetId` before this is
+ * called. Both are optional, so the builder still works from the flat text
+ * alone if it is ever called without them.
+ */
+export interface WallpaperPromptInput {
+  facts?: Record<string, string>;
+  preset?: StylePreset | null;
+  focusAreas?: string[];
+}
+
+/**
  * Build the art prompt from the reading's brief AND the chart facts.
  *
  * The brief alone would produce generic devotional art; the chart facts are
- * what make it this person's: the nakshatra's classical symbol, its deity,
- * and the ruling planet's classical colours (all pulled from
- * `src/content/vedic-mapping.ts`, never hard-coded here).
+ * what make it THIS person's: the nakshatra's classical symbol, its deity, the
+ * lagna (ascendant), the ruling planet's classical colours, and the conditions
+ * found in the chart (all pulled from the fact sheet, never hard-coded here).
+ *
+ * A chosen `preset` folds its own mood, blurb and ground palette into the
+ * prompt, so the painted art matches the style the user picked; with no preset
+ * the original, chart-only art direction is used unchanged.
  */
-export function promptFromBrief(reading: Reading | null, chartFacts: string): string {
+export function promptFromBrief(
+  reading: Reading | null,
+  chartFacts: string,
+  opts?: WallpaperPromptInput,
+): string {
   const brief = reading?.wallpaperBrief;
   const mood = brief?.mood?.trim();
   const palette = brief?.palette?.trim();
   const motifs = brief?.motifs?.trim();
+  const preset = opts?.preset ?? null;
 
-  // Pull the chart-specific ingredients out of the fact sheet.
-  const nakshatra = /(?:Nakshatra|nakshatra):\s*([^.(]+)/.exec(chartFacts)?.[1]?.trim() ?? "";
-  const deity = /(?:Deity|deity):\s*([^.(]+)/.exec(chartFacts)?.[1]?.trim() ?? "";
-  const symbol = /(?:Symbol|symbol):\s*([^.(]+)/.exec(chartFacts)?.[1]?.trim() ?? "";
-  const ruling = /(?:Ruling planet|Ruling Planet|ruling planet):\s*([^.(]+)/.exec(chartFacts)?.[1]?.trim() ?? "";
-  const colour = /(?:colours|colors)\s+([#\w ,()/]+?)(?:;|bija|$)/.exec(chartFacts)?.[1]?.trim() ?? "";
+  // Pull the chart-specific ingredients out of the STRUCTURED fact sheet first,
+  // and fall back to scraping the flat text only when it is not supplied.
+  const facts = opts?.facts ?? {};
+  const fact = (key: string): string => (facts[key] ?? "").trim();
+  const grab = (re: RegExp, key: string): string =>
+    fact(key) || (re.exec(chartFacts)?.[1]?.trim() ?? "");
+
+  const nakshatra = grab(/(?:Nakshatra|nakshatra):\s*([^.(]+)/, "nakshatra");
+  const deity = grab(/(?:Deity|deity):\s*([^.(]+)/, "deity");
+  const symbol = grab(/(?:Symbol|symbol):\s*([^.(]+)/, "symbol");
+  const lagna = grab(/Lagna:\s*([^(.]+)/, "lagna");
+  const lagnaEnglish = fact("lagnaEnglish");
+  const lagnaLord = fact("lagnaLord");
+  const conditions = fact("conditions");
+  const ruling = grab(/(?:Ruling planet|Ruling Planet|ruling planet):\s*([^.(]+)/, "rulingPlanet");
+  const colour = grab(/(?:colours|colors)\s+([#\w ,()/]+?)(?:;|bija|$)/, "rulingColour");
 
   // The ruling planet's classical colours, straight from the content table.
   const rulingKey = Object.keys(GRAHAS).find(
@@ -249,15 +317,15 @@ export function promptFromBrief(reading: Reading | null, chartFacts: string): st
   );
   const graha = rulingKey ? GRAHAS[rulingKey as keyof typeof GRAHAS] : null;
 
-  // The prompt is assembled in PRIORITY order: the mandatory negative clause
-  // and the chart-derived ingredients come first, the reading's brief next.
-  // The word budget is then spent front-to-back, so a long brief can never
-  // push out the parts that make the art chart-specific.
+  // The prompt is assembled in PRIORITY order: the chart-derived ingredients
+  // come first, the reading's brief and the chosen style next. The word budget
+  // is spent front-to-back, so a long brief can never push out the parts that
+  // make the art chart-specific and per-user.
   const parts: string[] = [];
 
   if (nakshatra) {
     parts.push(
-      `Central motif: the classical symbol of the nakshatra ${nakshatra} (${symbol || "its traditional emblem"}).`,
+      `Central motif: the classical symbol of the nakshatra ${nakshatra} (${symbol || "its traditional emblem"}), the emblem of this birth star.`,
     );
   }
   if (deity) {
@@ -272,6 +340,19 @@ export function promptFromBrief(reading: Reading | null, chartFacts: string): st
   } else if (colour) {
     parts.push(`Palette anchored on the ruling planet's colours: ${colour}.`);
   }
+  if (lagna) {
+    parts.push(
+      `Composition rising toward the ${lagna}${lagnaEnglish ? ` (${lagnaEnglish})` : ""} ascendant${lagnaLord ? `, ruled by ${lagnaLord}` : ""}, an upward-opening ascending geometry.`,
+    );
+  }
+  if (conditions && !/^none(\s+detected)?$/i.test(conditions.trim())) {
+    parts.push(`Let the art quietly answer these life themes without any words: ${conditions}.`);
+  }
+  if (preset) {
+    parts.push(
+      `Style preset "${preset.name}": ${preset.blurb} Ground tones from ${preset.bg.from} via ${preset.bg.via} to ${preset.bg.to} at ${preset.bg.angle} degrees, ${preset.texture} texture, ${preset.rings} concentric rings, ${preset.petals} lotus petals, ${preset.dark ? "deeply nocturnal and moody" : "light, airy and open"}.`,
+    );
+  }
   if (mood) parts.push(`Mood: ${mood}.`);
   if (motifs) parts.push(`Include ${motifs}.`);
   if (palette) parts.push(`Additional colour notes: ${palette}.`);
@@ -279,13 +360,30 @@ export function promptFromBrief(reading: Reading | null, chartFacts: string): st
     parts.push("Leave a clear calm area in the centre for a sacred inscription to be added later.");
   }
   parts.push(
-    "Premium devotional Indian astrology wallpaper art, vertical portrait, temple-gold linework on a deep indigo-black ground, intricate yantra geometry, fine gold filigree, subtle film grain, museum-quality digital painting.",
+    preset
+      ? `Premium devotional Indian astrology wallpaper art, vertical portrait, painted in the ${preset.name} manner on fine linework, intricate yantra geometry, museum-quality digital painting.`
+      : "Premium devotional Indian astrology wallpaper art, vertical portrait, temple-gold linework on a deep indigo-black ground, intricate yantra geometry, fine gold filigree, subtle film grain, museum-quality digital painting.",
   );
+
+  if (opts?.focusAreas?.length) {
+    const AREA_MOOD: Record<string, string> = {
+      wealth: "abundance and prosperity motifs",
+      relationships: "union and pairing motifs",
+      health: "vitality and radiant strength",
+      protection: "shielding geometric strength",
+      career: "an ascending path of light",
+      education: "the lamp of learning",
+      spiritual: "deep mandala stillness",
+      family: "hearth and roots",
+    };
+    const moods = opts.focusAreas.map((a) => AREA_MOOD[a] ?? a).join(", ");
+    parts.push(`Thematic mood: ${moods}.`);
+  }
 
   // The negative clause is mandatory and is reserved its word budget FIRST,
   // so the clamp can never truncate it away.
   const tailWords = NO_TEXT_CLAUSE.split(/\s+/).length;
-  const body = clampWords(parts.join(" "), Math.max(20, 100 - tailWords - 1));
+  const body = clampWords(parts.join(" "), Math.max(40, 200 - tailWords - 1));
 
   return `${body} ${NO_TEXT_CLAUSE}`;
 }
