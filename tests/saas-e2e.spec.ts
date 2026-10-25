@@ -1,250 +1,250 @@
-import { test, expect } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  fillBirthForm,
+  formNote,
+  gotoApp,
+  previewSvg,
+  previewText,
+  submitAndAwaitPreview,
+  type BirthFormData,
+} from "./support/form";
 
 /**
- * End-to-end tests for the SaaS funnel infrastructure.
+ * GOGAJI product end-to-end test.
  *
- * Run with: npx playwright test
- *
- * These tests verify:
- *  1. Form with seconds + timezone + manual entry
- *  2. Discovery gate capture
- *  3. Qualification blocks no-time input
- *  4. Deterministic wallpaper generates
- *  5. Download buttons work
+ * The whole product path is deterministic: no AI provider, no geocoding, no
+ * wall-clock dependency. The birth places are typed into the manual
+ * coordinate fields, the AI checkbox stays off, and the expected chart facts
+ * are the ones the deterministic engine (src/lib/astro.ts) produces for those
+ * exact birth data - verified against the engine, not guessed.
  */
 
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+interface ExpectedChart {
+  /** roman nakshatra name, as shown in the chart summary panel */
+  nakshatra: string;
+  /** Devanagari nakshatra name, as printed on the artwork */
+  nakshatraDevanagari: string;
+  pada: number;
+  /** roman lagna sign */
+  lagna: string;
+  /** the LAGNA caption printed on the artwork */
+  lagnaCaption: string;
+  /** roman ruling-planet name */
+  rulingPlanet: string;
+  /** the graha beeja mantra printed on the artwork */
+  mantraDevanagari: string;
+}
 
-test.describe("GOGAJI SaaS E2E", () => {
-  test.beforeEach(async ({ page }) => {
-    // Clear localStorage before each test
-    await page.goto(BASE_URL);
-    await page.evaluate(() => localStorage.clear());
+/**
+ * 1992-08-14, 05:45 IST, New Delhi.
+ * Engine output: Moon in Dhaniṣṭhā, pada 4, lagna Karka (Cancer),
+ * ruling planet Maṅgala (Mars), UTC 1992-08-14T00:15:00Z.
+ */
+const PERSON_A: BirthFormData & { expected: ExpectedChart } = {
+  name: "Asha Ramesh",
+  month: 8,
+  day: 14,
+  year: 1992,
+  hour12: 5,
+  minute: 45,
+  ampm: "AM",
+  placeLabel: "New Delhi",
+  latitude: 28.6139,
+  longitude: 77.209,
+  timezone: "Asia/Kolkata",
+  expected: {
+    nakshatra: "Dhaniṣṭhā",
+    nakshatraDevanagari: "धनिष्ठा",
+    pada: 4,
+    lagna: "Karka",
+    lagnaCaption: "LAGNA KARKA",
+    rulingPlanet: "Maṅgala",
+    mantraDevanagari: "ॐ क्रां क्रीं क्रौं सः भौमाय नमः",
+  },
+};
+
+/**
+ * 1988-03-21, 18:30 IST, Bengaluru.
+ * Engine output: Moon in Bharaṇī, pada 4, lagna Kanyā (Virgo),
+ * ruling planet Śukra (Venus), UTC 1988-03-21T13:00:00Z.
+ * Deliberately different from PERSON_A in every chart-derived token.
+ */
+const PERSON_B: BirthFormData & { expected: ExpectedChart } = {
+  name: "Vikram Sen",
+  month: 3,
+  day: 21,
+  year: 1988,
+  hour12: 6,
+  minute: 30,
+  ampm: "PM",
+  placeLabel: "Bengaluru",
+  latitude: 12.9716,
+  longitude: 77.5946,
+  timezone: "Asia/Kolkata",
+  expected: {
+    nakshatra: "Bharaṇī",
+    nakshatraDevanagari: "भरणी",
+    pada: 4,
+    lagna: "Kanyā",
+    lagnaCaption: "LAGNA KANYĀ",
+    rulingPlanet: "Śukra",
+    mantraDevanagari: "ॐ द्रां द्रीं द्रौं सः शुक्राय नमः",
+  },
+};
+
+/** Open a disclosure, but only when it is still closed. */
+const openIfClosed = async (locator: Locator) => {
+  if ((await locator.getAttribute("aria-expanded")) !== "true") await locator.click();
+};
+
+/**
+ * The shared form helper types into the manual coordinate fields and the
+ * optional seconds box, both of which sit behind a disclosure now, so they
+ * are opened first.
+ */
+const fillForm = async (page: Page, d: BirthFormData) => {
+  await openIfClosed(page.locator("#toggle-seconds"));
+  await openIfClosed(page.locator("#toggle-manual"));
+  await fillBirthForm(page, d);
+};
+
+test.describe("GOGAJI wallpaper generation (end to end)", () => {
+  test("a complete birth form produces a chart-derived wallpaper preview", async ({ page }) => {
+    await gotoApp(page);
+    await fillForm(page, PERSON_A);
+    await submitAndAwaitPreview(page);
+
+    // The preview is the phone-sized wallpaper SVG (1170 x 2532).
+    await expect(previewSvg(page)).toHaveAttribute("viewBox", "0 0 1170 2532");
+
+    const text = await previewText(page);
+    // The artwork carries the chart-derived tokens, not placeholders.
+    expect(text).toContain(PERSON_A.expected.nakshatraDevanagari);
+    expect(text).toContain(PERSON_A.expected.mantraDevanagari);
+    expect(text).toContain(PERSON_A.expected.lagnaCaption);
+    expect(text).toContain("LAGNA KARKA · WHOLE-SIGN HOUSES");
+    // ... and the person's own name.
+    expect(text.toUpperCase()).toContain("ASHA RAMESH");
+
+    // The chart summary panel agrees with the artwork.
+    await expect(formNote(page)).toHaveText(
+      `Wallpaper drawn for ${PERSON_A.expected.nakshatra} · pada ${PERSON_A.expected.pada}.`,
+    );
+    await expect(page.locator("dd", { hasText: PERSON_A.expected.nakshatra })).toBeVisible();
+    await expect(page.locator("dd", { hasText: PERSON_A.expected.lagna })).toBeVisible();
+    await expect(page.locator("dd", { hasText: PERSON_A.expected.rulingPlanet })).toBeVisible();
   });
 
-  test("Form accepts seconds and timezone with manual entry", async ({ page }) => {
-    await page.goto(BASE_URL);
+  test("a different birth data set produces different chart-derived tokens", async ({ page }) => {
+    await gotoApp(page);
 
-    // Fill name
-    await page.fill(\'input[name="name"]\', "Arjuna Kumar");
+    await fillForm(page, PERSON_A);
+    await submitAndAwaitPreview(page);
+    const first = await previewText(page);
 
-    // Fill date
-    await page.fill(\'input[name="date"]\', "1995-08-15");
+    await fillForm(page, PERSON_B);
+    await submitAndAwaitPreview(page);
+    // Wait for the chart of the SECOND birth data to be the one on screen.
+    await expect(formNote(page)).toHaveText(
+      `Wallpaper drawn for ${PERSON_B.expected.nakshatra} · pada ${PERSON_B.expected.pada}.`,
+    );
+    const second = await previewText(page);
 
-    // Fill time with seconds (HH:MM:SS format)
-    await page.fill(\'input[name="time"]\', "14:30:45");
+    // First preview: the expected tokens of the first birth data.
+    expect(first).toContain(PERSON_A.expected.nakshatraDevanagari);
+    expect(first).toContain(PERSON_A.expected.mantraDevanagari);
+    expect(first).toContain(PERSON_A.expected.lagnaCaption);
 
-    // Fill place - type to trigger search
-    const placeInput = page.locator(\'input[name="place"]\');
-    await placeInput.fill("Mumbai");
-    await page.waitForTimeout(1000); // Wait for geocoding results
+    // Second preview: the expected tokens of the second birth data.
+    expect(second).toContain(PERSON_B.expected.nakshatraDevanagari);
+    expect(second).toContain(PERSON_B.expected.mantraDevanagari);
+    expect(second).toContain(PERSON_B.expected.lagnaCaption);
 
-    // Select first result
-    await page.click(\'text=Mumbai\', { timeout: 5000 });
-
-    // Verify timezone dropdown is populated and select a zone
-    const timezoneSelect = page.locator(\'select[name="timezone"]\');
-    await expect(timezoneSelect).toBeVisible();
-    await timezoneSelect.selectOption("Asia/Kolkata");
-
-    // Verify latitude and longitude are populated (hidden fields)
-    const lat = await page.inputValue(\'input[name="latitude"]\');
-    const lon = await page.inputValue(\'input[name="longitude"]\');
-    expect(parseFloat(lat)).toBeGreaterThan(0);
-    expect(parseFloat(lon)).toBeGreaterThan(0);
-
-    // Form should be valid
-    const submitButton = page.locator(\'button[type="submit"]\');
-    await expect(submitButton).toBeEnabled();
+    // ... and the chart-derived tokens really did change.
+    expect(second).not.toContain(PERSON_A.expected.nakshatraDevanagari);
+    expect(second).not.toContain(PERSON_A.expected.mantraDevanagari);
+    expect(second).not.toContain(PERSON_A.expected.lagnaCaption);
+    expect(second).not.toBe(first);
   });
 
-  test("Discovery gate captures answers", async ({ page }) => {
-    await page.goto(BASE_URL);
+  test("a focus area changes the artwork: the bhava house is highlighted", async ({ page }) => {
+    await gotoApp(page);
+    await fillForm(page, PERSON_A);
+    await submitAndAwaitPreview(page);
 
-    // Check if discovery gate is shown (depends on your routing)
-    const q1 = page.locator(\'text=What will you use this for?\');
-    if (await q1.isVisible({ timeout: 2000 })) {
-      // Select an intent
-      await page.click(\'text=Child\\'s room decoration\');
-      await page.click(\'button:has-text("Continue")\');
+    // Without a focus area the poster carries no focus band at all.
+    const before = await previewSvg(page).innerHTML();
+    expect(before).not.toContain("FOCUS ·");
+    expect(before).not.toContain("DHANA");
 
-      // Fill Q2
-      await page.fill(\'textarea\', "Too generic, didn\\'t feel personal");
-      await page.click(\'button:has-text("Start Creating")\');
+    // Picking "Wealth & finances" (dhana, the 2nd house) redraws the poster.
+    await page.locator("#focus-wealth").check();
 
-      // Verify answers are stored (check localStorage or form state)
-      const stored = await page.evaluate(() => {
-        return {
-          intent: (window as any).__discoveryIntent,
-          previousFailure: (window as any).__discoveryPreviousFailure,
-        };
-      });
-
-      // This test is placeholder - actual implementation depends on state management
-      expect(stored).toBeDefined();
-    }
+    await expect(previewSvg(page)).toContainText("DHANA", { timeout: 20_000 });
+    const after = await previewSvg(page).innerHTML();
+    expect(after).not.toBe(before);
+    expect(after).toContain("FOCUS ·");
+    expect(after).toContain("DHANA");
+    // The house the area governs, named exactly as the chart names it.
+    expect(after).toContain("2nd (dhana)");
   });
 
-  test("Qualification blocks submission without birth time", async ({ page }) => {
-    await page.goto(BASE_URL);
+  test("the hero hands the child's name over and the artwork is drawn straight away", async ({ page }) => {
+    await page.goto("/?name=Aarav&for=child&generate=1", { timeout: 60_000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector("#full-name");
+        if (!el) return false;
+        return Object.keys(el).some((k) => k.startsWith("__reactProps$"));
+      },
+      undefined,
+      { timeout: 90_000 },
+    );
 
-    // Fill name
-    await page.fill(\'input[name="name"]\', "Test User");
+    // The name and the subject arrive from the query string.
+    await expect(page.locator("#full-name")).toHaveValue("Aarav", { timeout: 30_000 });
+    await expect(page.locator('label[for="full-name"]')).toHaveText("Your child's name");
+    await expect(page.locator("#subject-child")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('label[for="birth-date"]')).toHaveText("Your child's birth date");
 
-    // Fill date
-    await page.fill(\'input[name="date"]\', "1990-01-01");
-
-    // Leave time empty
-    await page.fill(\'input[name="time"]\', "");
-
-    // Fill place
-    const placeInput = page.locator(\'input[name="place"]\');
-    await placeInput.fill("Delhi");
-    await page.waitForTimeout(1000);
-    await page.click(\'text=Delhi\', { timeout: 5000 }).catch(() => {});
-
-    // Try to submit
-    await page.click(\'button[type="submit"]\');
-
-    // Should see error message about birth time being required
-    await expect(
-      page.locator(\'text=/Birth time is required/i\')
-    ).toBeVisible({ timeout: 5000 });
+    // ... and the wallpaper is already drawn, without a single click.
+    await expect(previewSvg(page)).toHaveCount(1, { timeout: 30_000 });
+    const text = await previewText(page);
+    expect(text.toUpperCase()).toContain("AARAV");
+    await expect(formNote(page)).toContainText("Wallpaper drawn for");
   });
 
-  test("Deterministic wallpaper generates for valid input", async ({ page }) => {
-    await page.goto(BASE_URL);
+  test("the phone PNG download fires with the chart-derived filename", async ({ page }) => {
+    await gotoApp(page);
+    await fillForm(page, PERSON_A);
+    await submitAndAwaitPreview(page);
 
-    // Fill complete valid form
-    await page.fill(\'input[name="name"]\', "Ravi Sharma");
-    await page.fill(\'input[name="date"]\', "1988-03-21");
-    await page.fill(\'input[name="time"]\', "06:15:00");
+    const phoneButton = page.getByRole("button", { name: /Download phone PNG 1170×2532/ });
+    await expect(phoneButton).toBeVisible();
 
-    // Fill place
-    const placeInput = page.locator(\'input[name="place"]\');
-    await placeInput.fill("Bangalore");
-    await page.waitForTimeout(1000);
-    await page.click(\'text=Bangalore\', { timeout: 5000 });
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      phoneButton.click(),
+    ]);
 
-    // Select timezone
-    await page.selectOption(\'select[name="timezone"]\', "Asia/Kolkata");
+    expect(download.suggestedFilename()).toBe("nakshatra-canvas-asha-ramesh-phone-1170x2532.png");
+    expect(download.suggestedFilename()).toMatch(/^nakshatra-canvas-[a-z0-9-]+-phone-1170x2532\.png$/);
 
-    // Submit
-    await page.click(\'button[type="submit"]\');
-
-    // Wait for chart to compute and render
-    await page.waitForSelector(\'text=/Nakshatra/i\', { timeout: 10000 });
-
-    // Verify chart data is displayed
-    await expect(page.locator(\'text=/Moon Nakshatra/i\')).toBeVisible();
-
-    // Verify SVG wallpaper preview exists
-    const svg = page.locator("svg");
-    await expect(svg.first()).toBeVisible();
-
-    // Verify the same input produces the same chart (deterministic)
-    const nakshatra1 = await page.textContent(\'[data-testid="nakshatra-name"]\').catch(() => null);
-    
-    // Refresh and submit again
-    await page.reload();
-    await page.fill(\'input[name="name"]\', "Ravi Sharma");
-    await page.fill(\'input[name="date"]\', "1988-03-21");
-    await page.fill(\'input[name="time"]\', "06:15:00");
-    await placeInput.fill("Bangalore");
-    await page.waitForTimeout(1000);
-    await page.click(\'text=Bangalore\', { timeout: 5000 });
-    await page.selectOption(\'select[name="timezone"]\', "Asia/Kolkata");
-    await page.click(\'button[type="submit"]\');
-    await page.waitForSelector(\'text=/Nakshatra/i\', { timeout: 10000 });
-
-    const nakshatra2 = await page.textContent(\'[data-testid="nakshatra-name"]\').catch(() => null);
-
-    // Both should match (if test IDs are present)
-    if (nakshatra1 && nakshatra2) {
-      expect(nakshatra1).toBe(nakshatra2);
-    }
+    // The export really produced a PNG.
+    const path = await download.path();
+    expect(path).toBeTruthy();
   });
 
-  test("Download buttons work for desktop and phone", async ({ page }) => {
-    await page.goto(BASE_URL);
+  test("without the AI opt-in nothing is persisted to localStorage", async ({ page }) => {
+    await gotoApp(page);
+    await fillForm(page, PERSON_A);
+    await submitAndAwaitPreview(page);
 
-    // Fill and submit valid form
-    await page.fill(\'input[name="name"]\', "Download Test");
-    await page.fill(\'input[name="date"]\', "2000-06-10");
-    await page.fill(\'input[name="time"]\', "12:00:00");
-
-    const placeInput = page.locator(\'input[name="place"]\');
-    await placeInput.fill("Chennai");
-    await page.waitForTimeout(1000);
-    await page.click(\'text=Chennai\', { timeout: 5000 });
-    await page.selectOption(\'select[name="timezone"]\', "Asia/Kolkata");
-    await page.click(\'button[type="submit"]\');
-
-    // Wait for wallpaper to render
-    await page.waitForSelector(\'text=/Nakshatra/i\', { timeout: 10000 });
-
-    // Listen for download events
-    const downloadPromise = page.waitForEvent("download");
-
-    // Click desktop download button (if visible)
-    const desktopBtn = page.locator(\'button:has-text("Desktop")\');
-    if (await desktopBtn.isVisible({ timeout: 2000 })) {
-      await desktopBtn.click();
-
-      // Verify download started
-      const download = await downloadPromise;
-      expect(download.suggestedFilename()).toMatch(/\.png$/);
-    }
-
-    // Click phone download button
-    const downloadPromise2 = page.waitForEvent("download");
-    const phoneBtn = page.locator(\'button:has-text("Phone")\');
-    if (await phoneBtn.isVisible({ timeout: 2000 })) {
-      await phoneBtn.click();
-      const download2 = await downloadPromise2;
-      expect(download2.suggestedFilename()).toMatch(/\.png$/);
-    }
-  });
-
-  test("CRM captures lead data in localStorage", async ({ page }) => {
-    await page.goto(BASE_URL);
-
-    // Clear localStorage
-    await page.evaluate(() => localStorage.clear());
-
-    // Submit form
-    await page.fill(\'input[name="name"]\', "CRM Test");
-    await page.fill(\'input[name="date"]\', "1992-11-05");
-    await page.fill(\'input[name="time"]\', "18:30:00");
-
-    const placeInput = page.locator(\'input[name="place"]\');
-    await placeInput.fill("Pune");
-    await page.waitForTimeout(1000);
-    await page.click(\'text=Pune\', { timeout: 5000 });
-    await page.selectOption(\'select[name="timezone"]\', "Asia/Kolkata");
-    await page.click(\'button[type="submit"]\');
-
-    // Wait for processing
-    await page.waitForTimeout(2000);
-
-    // Check localStorage for lead capture
-    const leadIndex = await page.evaluate(() => {
-      return localStorage.getItem("lead_index");
-    });
-
-    expect(leadIndex).toBeTruthy();
-
-    const leads = await page.evaluate(() => {
-      const index = JSON.parse(localStorage.getItem("lead_index") || "[]");
-      if (index.length === 0) return null;
-      const leadId = index[index.length - 1];
-      return localStorage.getItem(`lead_${leadId}`);
-    });
-
-    if (leads) {
-      const leadData = JSON.parse(leads);
-      expect(leadData.input.name).toBe("CRM Test");
-      expect(leadData.nakshatra).toBeTruthy();
-    }
+    const stored = await page.evaluate(() => ({
+      leadIndex: localStorage.getItem("lead_index"),
+      leadKeys: Object.keys(localStorage).filter((k) => k.startsWith("lead_")),
+    }));
+    expect(stored.leadIndex).toBeNull();
+    expect(stored.leadKeys).toEqual([]);
   });
 });

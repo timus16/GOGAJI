@@ -1,4 +1,41 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
-  "snapshot": false
+  "snapshot": false,
+  "agents": {
+    "workflow-orchestrator": {
+      "description": "Primary agent for deterministic wallpaper pipeline",
+      "mode": "primary"
+    },
+    "backend": {
+      "description": "Server functions, APIs, DB - ADHD focus mode",
+      "mode": "subagent"
+    },
+    "frontend": {
+      "description": "UI components - ADHD focus mode",
+      "mode": "subagent"
+    },
+    "qa": {
+      "description": "Playwright tests - ADHD focus mode",
+      "mode": "subagent"
+    },
+    "reviewer": {
+      "description": "Code review - ADHD focus mode",
+      "mode": "subagent"
+    },
+    "devops": {
+      "description": "Build and deploy - ADHD focus mode",
+      "mode": "subagent"
+    },
+    "architect": {
+      "description": "Design decisions - ADHD focus mode",
+      "mode": "subagent"
+    }
+  },
+  "skills": [
+    "kundli-engine",
+    "problem-analyzer",
+    "wallpaper-context",
+    "image-prompt",
+    "adhd-focus"
+  ]
 }

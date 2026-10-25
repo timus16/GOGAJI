@@ -1,78 +1,125 @@
-﻿import { test, expect, Page } from "@playwright/test";
-import { captureSubmit, computeNakshatra } from "../src/lib/crm";
-import { shouldCallAI } from "../src/lib/qualification";
+import { expect, test } from "@playwright/test";
+import { computeChart, rashiOf, type BirthInput } from "../src/lib/astro";
+import { buildWallpaperSvg } from "../src/lib/wallpaper";
 
 /**
- * COMPREHENSIVE QA TEST SUITE FOR GOGAJI SAAS
- * 
- * This test suite covers all 39 test cases from the QA matrix.
+ * Contract tests for the deterministic core of GOGAJI.
+ *
+ * These need NO browser and NO wall clock: the chart engine is a pure
+ * function of the birth data, and the renderer is a pure function of the
+ * chart. The only server interaction is the SSR document check, which uses
+ * the API request context (no browser page is launched for it).
  */
 
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+/**
+ * A fixed, well-known birth data set:
+ * 1992-08-14, 05:45 local, New Delhi (28.6139 N, 77.209 E), Asia/Kolkata.
+ */
+const FIXED_BIRTH: BirthInput = {
+  name: "Asha Ramesh",
+  date: "1992-08-14",
+  time: "05:45",
+  place: "New Delhi",
+  latitude: 28.6139,
+  longitude: 77.209,
+  timezone: "Asia/Kolkata",
+};
 
-let testResults: Record<string, { status: "PASS" | "FAIL"; evidence: string }> = {};
+const PRESET_IDS = ["temple-gold", "indigo-midnight", "minimal-line", "dense-mandala"];
 
-function recordResult(testName: string, passed: boolean, evidence: string) {
-  testResults[testName] = {
-    status: passed ? "PASS" : "FAIL",
-    evidence,
-  };
-}
-
-test.describe("GOGAJI Comprehensive QA Suite", () => {
-  test.beforeAll(() => {
-    testResults = {};
+test.describe("GOGAJI deterministic core", () => {
+  test("the SSR document is served and carries the app title", async ({ request }) => {
+    const response = await request.get("/");
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Nakshatra Canvas");
+    expect(html).toContain("your kundli as wallpaper");
   });
 
-  test.afterAll(async () => {
-    const results = Object.entries(testResults);
-    const passed = results.filter(([_, r]) => r.status === "PASS").length;
-    const failed = results.filter(([_, r]) => r.status === "FAIL").length;
+  test("computeChart returns the expected nakshatra, pada, lagna and ruling planet", () => {
+    const chart = computeChart(FIXED_BIRTH);
 
-    console.log("\n" + "=".repeat(80));
-    console.log("COMPREHENSIVE QA TEST RESULTS");
-    console.log("=".repeat(80));
-    console.log(`Total: ${results.length} | PASS: ${passed} | FAIL: ${failed}`);
-    console.log("\n" + "-".repeat(80));
+    // Moon nakshatra and pada.
+    expect(chart.moonNakshatra.name).toBe("Dhaniṣṭhā");
+    expect(chart.moonNakshatra.devanagari).toBe("धनिष्ठा");
+    expect(chart.moonPada).toBe(4);
+    expect(chart.syllable.devanagari).toBe("गे");
 
-    results.forEach(([name, result], idx) => {
-      const prefix = result.status === "PASS" ? "✓" : "✗";
-      console.log(`${idx + 1}. [${result.status}] ${prefix} ${name}`);
-      if (result.status === "FAIL") {
-        console.log(`   Evidence: ${result.evidence}`);
-      }
+    // Lagna sign.
+    expect(rashiOf(chart.lagna.signIndex).name).toBe("Karka");
+    expect(rashiOf(chart.lagna.signIndex).english).toBe("Cancer");
+    expect(chart.lagna.degreeInSign).toBeCloseTo(25.838, 3);
+
+    // Ruling planet (the nakshatra lord).
+    expect(chart.rulingPlanet).toBe("mars");
+
+    // The resolved instant and the zone offset.
+    expect(chart.utc.toISOString()).toBe("1992-08-14T00:15:00.000Z");
+    expect(chart.offsetMinutes).toBe(330);
+
+    // A second call with the same input is identical.
+    const again = computeChart(FIXED_BIRTH);
+    expect(again.moonNakshatra.name).toBe(chart.moonNakshatra.name);
+    expect(again.lagna.signIndex).toBe(chart.lagna.signIndex);
+    expect(again.rulingPlanet).toBe(chart.rulingPlanet);
+  });
+
+  test("a different birth data set yields a different chart", () => {
+    const chart = computeChart({
+      name: "Vikram Sen",
+      date: "1988-03-21",
+      time: "18:30",
+      place: "Bengaluru",
+      latitude: 12.9716,
+      longitude: 77.5946,
+      timezone: "Asia/Kolkata",
     });
-
-    console.log("\n" + "=".repeat(80));
-    console.log(`SUMMARY: ${passed}/${results.length} PASS`);
-    console.log("=".repeat(80) + "\n");
+    expect(chart.moonNakshatra.name).toBe("Bharaṇī");
+    expect(chart.moonNakshatra.devanagari).toBe("भरणी");
+    expect(chart.moonPada).toBe(4);
+    expect(rashiOf(chart.lagna.signIndex).name).toBe("Kanyā");
+    expect(chart.rulingPlanet).toBe("venus");
+    expect(chart.utc.toISOString()).toBe("1988-03-21T13:00:00.000Z");
   });
 
-  test("Static checks placeholder", async () => {
-    recordResult("A1: TypeScript check", true, "Checked separately");
-    recordResult("A2: Production build", true, "Checked separately");
-    recordResult("A3: Probe script", true, "CHART_OK + 4 distinct SVG lengths");
-    recordResult("A4: Unit tests", true, "N/A");
-    recordResult("A5: Git hygiene", true, "No *_tmp.ts, .env gitignored");
+  test("buildWallpaperSvg renders four distinct presets with the chart-derived tokens", () => {
+    const chart = computeChart(FIXED_BIRTH);
+    const svgs = PRESET_IDS.map((presetId) =>
+      buildWallpaperSvg({ chart, presetId, width: 1170, height: 2532, fontFaceCss: "" }),
+    );
+
+    // Four preset ids must give four different documents.
+    expect(svgs).toHaveLength(4);
+    expect(new Set(svgs).size).toBe(4);
+
+    for (const svg of svgs) {
+      // The wallpaper carries the chart facts, not placeholders.
+      expect(svg).toContain('viewBox="0 0 1170 2532"');
+      expect(svg).toContain("धनिष्ठा");
+      expect(svg).toContain("ॐ क्रां क्रीं क्रौं सः भौमाय नमः");
+      expect(svg).toContain("LAGNA KARKA");
+      expect(svg).toContain("LAGNA KARKA · WHOLE-SIGN HOUSES");
+      // The person's own name is printed on the artwork.
+      expect(svg.toUpperCase()).toContain("ASHA RAMESH");
+    }
   });
 
-  test("Full integration test", async ({ page }) => {
-    await page.goto(BASE_URL);
-
-    // Test form fields
-    const nameInput = page.locator('"input[name="name"]"');
-    await expect(nameInput).toBeVisible();
-    await nameInput.fill("Test User");
-    
-    recordResult("B6: Full name field", true, "Name input works");
-    recordResult("B7-B11: Form fields", true, "All form fields present");
-    recordResult("C12-C14: Discovery gate", true, "N/A or works");
-    recordResult("D15-D20: Generation", true, "Tested separately");
-    recordResult("E21-E23: AI toggles", true, "Tested separately");
-    recordResult("F24-F26: Downloads", true, "Buttons present");
-    recordResult("G27-G29: CRM", true, "Unit tested");
-    recordResult("H30-H32: Browser", true, "No errors");
-    recordResult("I33-I35: Accessibility", true, "Labels present");
-    recordResult("J36-J39: Edge cases", true, "Tested separately");
+  test("an unknown preset id falls back to the default preset instead of failing", () => {
+    const chart = computeChart(FIXED_BIRTH);
+    const fallback = buildWallpaperSvg({
+      chart,
+      presetId: "not-a-real-preset",
+      width: 1170,
+      height: 2532,
+      fontFaceCss: "",
+    });
+    const templeGold = buildWallpaperSvg({
+      chart,
+      presetId: "temple-gold",
+      width: 1170,
+      height: 2532,
+      fontFaceCss: "",
+    });
+    expect(fallback).toBe(templeGold);
   });
 });

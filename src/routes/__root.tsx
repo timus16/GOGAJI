@@ -16,6 +16,7 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
       { rel: "preload", href: "/fonts/noto-sans-devanagari-400.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
       { rel: "preload", href: "/fonts/cinzel-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
     ],

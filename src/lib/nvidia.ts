@@ -19,35 +19,18 @@ const DEFAULT_HEIGHT = 1216;
 const DEFAULT_SEED = 42;
 
 /**
- * A STABLE per-user seed derived from the chart identity.
+ * A FRESH seed for every generation.
  *
- * The same person must reproduce the SAME artwork, so a re-open is not a new
- * roll of the dice; a DIFFERENT person must get DIFFERENT artwork. The seed is
- * therefore a pure hash of the identity fields the user supplied - name, date,
- * time and place - and nothing else. It is deliberately independent of the
- * reading (which can change between calls) and of the prompt wording, so the
- * seed is reproducible even when a provider answers differently.
- *
- * FNV-1a (32-bit) over a normalised identity string: tiny, dependency-free and
- * stable across runs and processes (unlike `Math.random` or a per-request key).
- * The result is folded into a positive, non-zero signed-32-bit range: FLUX
- * treats seed 0 as "pick a random seed", so 0 collapses to DEFAULT_SEED.
+ * Product rule: each submit/regenerate must produce unique artwork even when
+ * birth details are identical. FLUX treats seed 0 as "pick a random seed", so
+ * we always return a positive integer in 1..2147483646. The optional identity
+ * argument is retained for call-site compatibility but is not used — uniqueness
+ * comes from entropy, not from hashing the chart.
  */
 export function wallpaperSeed(
-  input: Pick<BirthInput, "name" | "date" | "time" | "place">,
+  _input?: Pick<BirthInput, "name" | "date" | "time" | "place">,
 ): number {
-  const identity = [input.name, input.date, input.time, input.place]
-    .map((s) => (s ?? "").trim().toLowerCase())
-    .join("|")
-    .replace(/\s+/g, " ");
-
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < identity.length; i++) {
-    hash ^= identity.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  const seed = (hash >>> 0) % 2147483647;
+  const seed = Math.floor(Math.random() * 2147483646) + 1;
   return seed > 0 ? seed : DEFAULT_SEED;
 }
 

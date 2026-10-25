@@ -1,6 +1,6 @@
 ---
 name: astrology-premium-service
-description: Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (active chain: Gemini -> OpenRouter; Baidu exists but is NOT in the active chain), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".
+description: 'Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (active chain: Gemini -> OpenRouter; Baidu exists but is NOT in the active chain), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".'
 ---
 
 # Astrology Premium Service (GOGAJI)
@@ -317,8 +317,9 @@ extensionless imports.
   in-memory (they start empty on a restart or a second replica): `src/lib/gemini.ts` keeps
   a 24 h reading cache (max 200 entries) keyed by the exact fact sheet, and
   `src/lib/nvidia.ts` keeps a 7-day image cache (max 50 entries) keyed by
-  seed + width x height + the exact prompt. Only successes are cached. A stable seed with
-  the same prompt is what makes the artwork reproducible.
+  seed + width x height + the exact prompt. Only successes are cached. Each generation
+  uses a fresh random seed so the same chart still gets unique artwork; the cache only
+  dedupes identical seed+prompt retries within one process.
 - **The deterministic SVG path is the free fallback and must keep working with no keys.**
   `buildWallpaperSvg` is a pure function; it must never require a key, a network call, or
   an AI model. If a change breaks the no-key path, that change is wrong.

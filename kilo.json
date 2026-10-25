@@ -1,0 +1,9 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "default_agent": "workflow-orchestrator",
+  "snapshots": false,
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}

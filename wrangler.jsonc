@@ -1,82 +1,19 @@
-﻿// Cloudflare Workers deployment for the Nakshatra Canvas (team-site) app.
-//
-// TanStack Start's official Cloudflare path uses the Cloudflare Vite plugin
-// (@cloudflare/vite-plugin) and points `main` at the framework's own server
-// entry. This repo does NOT use that plugin: vite.config.ts is owned by another
-// agent and is shared with the Vercel/Bun deploys, so the Cloudflare build is
-// driven by scripts/build-cloudflare.ts instead. That script produces a plain
-// ES-module worker bundle at dist/cloudflare-worker/index.js, which is what
-// `main` points at here.
-//
-// Verified against:
-//  - https://developers.cloudflare.com/workers/static-assets/
-//  - https://developers.cloudflare.com/workers/wrangler/configuration/
-//  - https://developers.cloudflare.com/workers/runtime-apis/nodejs/process/
-//  - TanStack Start hosting guide (tanstack.com/start/latest/docs/framework/react/guide/hosting)
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "nakshatra-canvas",
   "main": "./dist/cloudflare-worker/index.js",
   "compatibility_date": "2026-08-04",
-  // nodejs_compat is required: the TanStack Start server bundle imports
-  // node:async_hooks (AsyncLocalStorage) and node:process, and the app's own
-  // server code reads process.env.GEMINI_API_KEY etc.
-  // From compatibility_date 2026-08-04 onward, nodejs_compat AND
-  // nodejs_compat_v2 are enabled by default, so this flag is a no-op there but
-  // is kept for clarity and for older-date compatibility.
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "upload_source_maps": true,
-  // The Worker is an SSR handler, not a static site: every request that is not
-  // a real file under dist/client must reach the TanStack Start handler so the
-  // router can render the route (and so server functions work).
-  //
-  // `run_worker_first: true` means the Worker script runs for EVERY request.
-  // Without it, Cloudflare's default behaviour serves a matching static asset
-  // directly (good for /assets/*) and only falls through to the Worker
-  // otherwise — but it also treats "Sec-Fetch-Mode: navigate" requests as
-  // asset requests when not_found_handling is "single-page-application",
-  // which would bypass SSR entirely and serve the SPA shell to browsers.
-  // Running the Worker first keeps SSR authoritative and lets the worker
-  // itself decide to hand static files back (see worker.ts).
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
-    // The app is server-rendered, so there is no SPA shell to fall back to.
-    // A request that matches no route and no asset must be a 404, not the
-    // client index.html. "none" is the default; it is stated explicitly so the
-    // behaviour is not silently changed by a future config edit.
     "not_found_handling": "none",
     "run_worker_first": true
   },
-  // Non-secret configuration only. Every value here is public in the deployed
-  // bundle — never put an API key in this block.
-  //
-  // SECRETS: GEMINI_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY and
-  // BAIDU_API_KEY are NOT listed here and must never be added here. They are
-  // read at request time from process.env (src/lib/server-key.ts) and are
-  // Worker secrets, set with:
-  //   npx wrangler secret put GEMINI_API_KEY
-  //   npx wrangler secret put NVIDIA_API_KEY
-  //   npx wrangler secret put OPENROUTER_API_KEY
-  //   npx wrangler secret put BAIDU_API_KEY
-  // DATABASE_URL is an optional secret for the Neon-backed persistence path
-  // (src/db.ts); set it the same way if that path is used.
-  // (See docs/CLOUDFLARE-DEPLOY.md. Per SITE.md, a .env file is NOT published,
-  // so a key that only lives in .env is missing on the live site.)
   "vars": {
-    // Public site origin, used for absolute URLs in meta tags / sitemap.
     "PUBLIC_SITE_URL": "https://nakshatra-canvas.workers.dev"
-  },
-  // Workers Free allows only 10 ms of CPU per request. Server-rendering a
-  // React route plus a server function that waits on the Gemini (30-60 s) and
-  // flux.1-dev image calls burns far more than that in CPU terms, and Workers
-  // Free cannot raise the limit above 10 ms. The `limits.cpu_ms` value below
-  // only takes effect on the Workers Paid plan, where the default is 30 s and
-  // the maximum is 300 s (5 min). A long AI call is mostly wall-clock waiting
-  // on fetch(), which does not count as CPU, so the practical requirement is
-  // that the account be on the Paid plan. See docs/CLOUDFLARE-DEPLOY.md.
-  "limits": {
-    "cpu_ms": 300000
   },
   "observability": {
     "enabled": true

@@ -1,4 +1,4 @@
-﻿---
+---
 name: ai-wallpaper-composite
 description: Use when working on the GOGAJI wallpaper request path — the WallpaperRequest contract, BYOK per-request provider keys, the focus-areas problem checklist, the banner/error tone, or the compositing of deterministic SVG chart art with NVIDIA AI artwork. Complements astrology-premium-service (pipeline) and regional-panchanga (pañchāṅga rules). Triggers on "WallpaperRequest", "BYOK", "bring your own key", "focus areas", "problem checklist", "all-in-one", "banner tone", "keys override".
 ---

@@ -3,22 +3,22 @@
  *
  * Two rules hold here, and they are the reason this file exists:
  *  1. The deterministic chart engine is the ONLY source of planetary maths.
- *     `computeChart()` computes the positions; the model is only ever given a
+ *     computeChart() computes the positions; the model is only ever given a
  *     fact sheet built from that chart. An LLM never computes a position.
  *  2. This handler NEVER throws. A missing key, a 429, a timeout, invalid
- *     JSON - all of them degrade to `reading: null` and/or no image plus a
- *     human-readable `error`, so the chart-accurate SVG path stays usable.
+ *     JSON - all of them degrade to reading: null and/or no image plus a
+ *     human-readable error, so the chart-accurate SVG path stays usable.
  *
  * A third rule is enforced here too: THE WHOLE REQUEST IS BUDGETED. Each
  * provider adapter carries its own internal timeout, but their worst cases add
  * up (the reading chain can spend 45s on Gemini, then 3x30s on OpenRouter,
  * then 30s on Baidu, and the art can spend 60s calling NVIDIA plus 60s
- * downloading the image). Unbounded, that is well past the host's idle
- * timeout - `serve.ts` pins Bun idleTimeout = 255s, and a serverless host caps
- * a function's duration lower still - so a slow-but-successful chain would be
+ * downloading the image). Unbounded, that is well past the host'"'"'s idle
+ * timeout - serve.ts pins Bun idleTimeout = 255s, and a serverless host caps
+ * a function'"'"'s duration lower still - so a slow-but-successful chain would be
  * killed and the client would get an empty 502 instead of the intended
  * degrade. The reading and the image are therefore each wrapped in a timeout
- * race, keeping the request's total worst case well under ~200s.
+ * race, keeping the request'"'"'s total worst case well under ~200s.
  */
 
 import { createServerFn } from "@tanstack/react-start";
@@ -29,8 +29,13 @@ import { presetById } from "~/content/vedic-mapping";
 import { errorMessage, readKundli, type Reading, type ReadingProvider } from "~/lib/gemini";
 import { nvidiaWallpaper, promptFromBrief, wallpaperSeed } from "~/lib/nvidia";
 
-// `ReadingProvider` is defined once, in the reading layer, and re-exported here
-// so existing importers of this module keep working. `Reading` is re-exported
+// Server-only imports - loaded dynamically to avoid client bundle leakage
+// import { currentQuotaIdentity, enforceQuota, recordGeneration } from "~/server/quota";
+// import { currentUserId } from "~/server/session.server";
+// import { premiumStatusFor } from "~/server/api-auth";
+
+// ReadingProvider is defined once, in the reading layer, and re-exported here
+// so existing importers of this module keep working. Reading is re-exported
 // for the same reason.
 export type { Reading, ReadingProvider } from "~/lib/gemini";
 export type { BirthInput } from "~/lib/astro";
@@ -38,10 +43,11 @@ export type { BirthChartConditions } from "~/content/problems";
 
 /**
  * The accepted request body: the birth input plus the OPTIONAL style preset id
- * the client may send. `presetId` is optional, so a client that omits it keeps
+ * the client may send. presetId is optional, so a client that omits it keeps
  * the exact previous, chart-only behaviour.
+ * deviceId is optional and used for anonymous quota accounting.
  */
-export type WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[]; keys?: { gemini?: string; openrouter?: string; nvidia?: string } };
+export type WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[]; keys?: { gemini?: string; openrouter?: string; nvidia?: string }; deviceId?: string };
 
 /** The fact sheet the model was given - the chart, in flat text. */
 export interface ChartSummary {
@@ -63,13 +69,13 @@ export interface WallpaperResponse {
 /*
  * ------------------------------------------------------------ AI time budget
  *
- * `Promise.race()` returns the moment the timer wins, but it CANNOT cancel the
+ * Promise.race() returns the moment the timer wins, but it CANNOT cancel the
  * losing promise: the provider fetch keeps running in the background (and, for
  * the reading chain, may still fall through to the next provider and make a
- * paid call). That is an accepted cost - the signatures of `readKundli()` and
- * `nvidiaWallpaper()` are fixed and owned elsewhere, so an AbortSignal cannot
+ * paid call). That is an accepted cost - the signatures of readKundli() and
+ * nvidiaWallpaper() are fixed and owned elsewhere, so an AbortSignal cannot
  * be threaded through them. The race only decides how long THIS handler waits
- * before degrading to `reading: null` / no image plus an `error`.
+ * before degrading to reading: null / no image plus an error.
  *
  * READ budget covers the whole reading chain; IMAGE budget covers the NVIDIA
  * call and, when the API answers with a URL, its image download. Summed worst
@@ -79,7 +85,7 @@ export interface WallpaperResponse {
 const AI_READING_BUDGET_MS = 70_000;
 const AI_IMAGE_BUDGET_MS = 95_000;
 
-/** Await `work`, but reject with a labelled error if it outlives `ms`. */
+/** Await work, but reject with a labelled error if it outlives ms. */
 async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -87,14 +93,12 @@ async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Prom
       work,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)),
+          () => reject(new Error(label + " timed out after " + Math.round(ms / 1000) + "s")),
           ms,
         );
       }),
     ]);
   } finally {
-    // Always clear the timer: without this, a request that resolved early
-    // would leave a pending timer alive until it fired.
     if (timer !== undefined) clearTimeout(timer);
   }
 }
@@ -102,7 +106,7 @@ async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Prom
 /*
  * -------------------------------------------------- rate limiting (paid path)
  *
- * `generateWallpaper` fronts paid providers, so it is throttled. This is a
+ * generateWallpaper fronts paid providers, so it is throttled. This is a
  * simple fixed-window counter keyed by client IP (falling back to a single
  * global bucket when no IP can be read), configurable with AI_RATE_LIMIT_PER_MIN
  * (default 5).
@@ -131,19 +135,18 @@ interface RateWindow {
 const rateWindows = new Map<string, RateWindow>();
 
 /**
- * The limiter key for this request. `getRequestIP()` reads the request stored
+ * The limiter key for this request. getRequestIP() reads the request stored
  * by the TanStack Start server-function runtime; it throws when there is no
- * request context (for example when `buildWallpaperResponse()` is called
+ * request context (for example when buildWallpaperResponse() is called
  * directly), so the lookup is guarded and falls back to one global bucket.
- * `xForwardedFor: true` is safe here because the site is served behind a
- * reverse proxy (see `serve.ts`); the header is trusted only on that path.
+ * xForwardedFor: true is safe here because the site is served behind a
+ * reverse proxy (see serve.ts); the header is trusted only on that path.
  */
 function rateLimitKey(): string {
   try {
     const ip = getRequestIP({ xForwardedFor: true });
     if (ip) return ip;
   } catch {
-    // No request context - fall through to the global bucket.
   }
   return "*global*";
 }
@@ -164,9 +167,8 @@ function checkRateLimit(): string | undefined {
   win.count += 1;
   if (win.count > limit) {
     const retry = Math.max(1, Math.ceil((win.resetAt - now) / 1000));
-    return `Rate limit reached for AI generation (${limit} requests per minute). Try again in about ${retry}s.`;
+    return "Rate limit reached for AI generation (" + limit + " requests per minute). Try again in about " + retry + "s.";
   }
-  // Opportunistic sweep so the per-instance map cannot grow without bound.
   if (rateWindows.size > 5000) {
     for (const [k, w] of rateWindows) if (now >= w.resetAt) rateWindows.delete(k);
   }
@@ -205,10 +207,9 @@ function rateLimitedResponse(data: BirthInput, error: string): WallpaperResponse
  * The handler body, kept as a plain exported function so it can be exercised
  * directly (and so the server function is a thin wrapper around it).
  *
- * `data.presetId`, when present, selects the user's wallpaper style; it is
- * resolved with `presetById()` and folded into the art prompt. The art is made
- * per-user by a stable seed hashed from the chart identity, so the same chart
- * always reproduces the same image.
+ * data.presetId, when present, selects the user's wallpaper style; it is
+ * resolved with presetById() and folded into the art prompt. The art seed is
+ * fresh on every call so the same chart can still get unique artwork.
  */
 export async function buildWallpaperResponse(data: WallpaperRequest): Promise<WallpaperResponse> {
     const errors: string[] = [];
@@ -218,66 +219,122 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       const chart = computeChart(data);
 
       // 2. The deterministic condition assessment, computed ONCE and handed to
-      //    the fact sheet (its second argument) so `assessChart` does not run a
-      //    second time inside `chartFactSheet`.
+      //    the fact sheet (its second argument) so assessChart does not run a
+      //    second time inside chartFactSheet.
       const conditions = assessChart(chart);
       const sheet = chartFactSheet(chart, conditions, data.focusAreas);
 
+      // QUOTA GATE (paid path) - BEFORE any provider call
+      let quotaAllowed = false;
+      let quotaIdentity: { userId?: string; deviceId?: string; ip?: string } = { userId: undefined, deviceId: undefined, ip: undefined };
+      try {
+        const quotaMod = await import("~/server/quota");
+        quotaIdentity = await quotaMod.currentQuotaIdentity(data.deviceId);
+        const gate = await quotaMod.enforceQuota(quotaIdentity);
+        quotaAllowed = gate.allowed;
+        if (!gate.allowed && gate.reason) {
+          errors.push(gate.reason);
+        }
+      } catch {
+        quotaAllowed = false;
+        errors.push("Usage could not be verified, so the premium render was skipped.");
+      }
+
+      // BYOK PREMIUM CHECK - resolve user and plan before provider calls
+      let isPremium = false;
+      let effectiveKeys = data.keys;
+      try {
+        const authMod = await import("~/server/api-auth");
+        const userId = await (await import("~/server/session.server")).currentUserId();
+        const premiumStatus = await authMod.premiumStatusFor(userId);
+        isPremium = premiumStatus.isPremium;
+        if (data.keys && (data.keys.gemini || data.keys.openrouter || data.keys.nvidia)) {
+          if (!isPremium) {
+            errors.push("Bring-your-own AI keys are a Premium feature \u2014 sign in with a Premium account to use your own keys.");
+            effectiveKeys = undefined;
+          }
+        }
+      } catch {
+        isPremium = false;
+        if (data.keys && (data.keys.gemini || data.keys.openrouter || data.keys.nvidia)) {
+          errors.push("Bring-your-own AI keys are a Premium feature \u2014 sign in with a Premium account to use your own keys.");
+          effectiveKeys = undefined;
+        }
+      }
+
       // 3. The reading. A failure here must not sink the whole request. The
       //    whole chain is raced against the reading budget so a slow provider
-      //    cannot hold the request open past the host's idle timeout.
+      //    cannot hold the request open past the host'"'"'s idle timeout.
       let reading: Reading | null = null;
       let provider: ReadingProvider | undefined;
-      try {
-        const result = await withTimeout(readKundli(sheet.text, data.keys), AI_READING_BUDGET_MS, "Reading");
-        reading = result.reading;
-        provider = result.provider;
-      } catch (err) {
-        // On timeout (or any other failure) `reading` stays null, so step 4
-        // falls back to the chart-only art prompt.
-        errors.push(`Reading unavailable: ${errorMessage(err)}`);
+      let readingProduced = false;
+      if (quotaAllowed) {
+        try {
+          const result = await withTimeout(readKundli(sheet.text, effectiveKeys), AI_READING_BUDGET_MS, "Reading");
+          reading = result.reading;
+          provider = result.provider;
+          readingProduced = reading !== null;
+        } catch (err) {
+          errors.push("Reading unavailable: " + errorMessage(err));
+        }
+      } else {
+        errors.push("Daily limit reached \u2014 sign in for more wallpapers.");
       }
 
       // 4. The artwork, strictly AFTER the reading (never concurrently) because
-      //    the art prompt prefers the reading's wallpaper brief and only falls
+      //    the art prompt prefers the reading'"'"'s wallpaper brief and only falls
       //    back to chart facts when the reading is missing.
-      //
-      //    Two things make the art FRESH PER USER. First, a stable per-user
-      //    SEED hashed from the chart identity (name, date, time, place): the
-      //    same person reproduces the same painting, a different person gets a
-      //    different one. Second, the prompt folds in the nakshatra, the lagna,
-      //    the ruling planet's classical colours and the chart's conditions.
-      //    The chosen style preset, when the client sends one, is resolved here
-      //    and folded into the prompt so the art matches the user's style.
       const seed = wallpaperSeed(data);
       const preset = data.presetId && data.presetId.trim() ? presetById(data.presetId) : null;
       const promptOpts = { facts: sheet.facts, preset, focusAreas: data.focusAreas };
 
       let wallpaperPrompt = "";
       let image: WallpaperResponse["image"];
-      try {
-        wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
-        const painted = await withTimeout(
-          nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216, seed, keyOverride: data.keys?.nvidia }),
-          AI_IMAGE_BUDGET_MS,
-          "Wallpaper",
-        );
-        image = {
-          dataUrl: painted.dataUrl,
-          mime: painted.mime,
-          width: painted.width,
-          height: painted.height,
-        };
-      } catch (err) {
-        // A timed-out or failed image yields a response without an image plus
-        // this explanatory error; the chart path stays fully usable.
-        errors.push(`Wallpaper unavailable: ${errorMessage(err)}`);
-        if (!wallpaperPrompt) {
-          try {
-            wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
-          } catch {
-            wallpaperPrompt = "";
+      let imageProduced = false;
+      if (quotaAllowed) {
+        try {
+          wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
+          const painted = await withTimeout(
+            nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216, seed, keyOverride: effectiveKeys?.nvidia }),
+            AI_IMAGE_BUDGET_MS,
+            "Wallpaper",
+          );
+          image = {
+            dataUrl: painted.dataUrl,
+            mime: painted.mime,
+            width: painted.width,
+            height: painted.height,
+          };
+          imageProduced = true;
+        } catch (err) {
+          errors.push("Wallpaper unavailable: " + errorMessage(err));
+          if (!wallpaperPrompt) {
+            try {
+              wallpaperPrompt = promptFromBrief(reading, sheet.text, promptOpts);
+            } catch {
+              wallpaperPrompt = "";
+            }
           }
+        }
+      } else {
+        try {
+          wallpaperPrompt = promptFromBrief(null, sheet.text, promptOpts);
+        } catch {
+          wallpaperPrompt = "";
+        }
+      }
+
+      // Record generation if any provider call actually produced output
+      if ((readingProduced || imageProduced) && quotaAllowed) {
+        try {
+          const quotaMod = await import("~/server/quota");
+          await quotaMod.recordGeneration({
+            ...quotaIdentity,
+            presetId: data.presetId,
+            nakshatra: sheet.facts.nakshatra,
+            focusAreas: data.focusAreas,
+          });
+        } catch {
         }
       }
 
@@ -293,14 +350,12 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       if (error) response.error = error;
       return response;
     } catch (err) {
-      // The last resort: the chart itself could not be computed. Return a
-      // valid response shape anyway so the client never crashes.
       return {
         chartSummary: { facts: {}, text: "" },
         conditions: { conditions: [], positives: [] },
         reading: null,
         wallpaperPrompt: "",
-        error: `Could not build the chart: ${errorMessage(err)}`,
+        error: "Could not build the chart: " + errorMessage(err),
       };
     }
 }
@@ -308,9 +363,6 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
 export const generateWallpaper = createServerFn({ method: "POST" })
   .validator((d: WallpaperRequest) => d)
   .handler(async ({ data }): Promise<WallpaperResponse> => {
-    // The paid-provider gate. Checked first, before any provider is touched;
-    // when it trips we return the normal response shape with an explanatory
-    // `error` and never call Gemini/OpenRouter/Baidu or NVIDIA.
     const limited = checkRateLimit();
     if (limited) return rateLimitedResponse(data, limited);
     return buildWallpaperResponse(data);
