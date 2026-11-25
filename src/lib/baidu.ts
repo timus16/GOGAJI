@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Baidu Qianfan fallback reading provider.
  *
  * Qianfan is OpenAI-compatible and its ERNIE free tier is permanent and
@@ -10,7 +10,7 @@
  * answer goes through the same `sanitizeReading()` validator.
  */
 
-import { baiduKey } from "~/lib/server-key";
+import { baiduKey } from "~/lib/env";
 import {
   buildReadingPrompt,
   sanitizeReading,
@@ -42,7 +42,7 @@ export async function baiduReading(chartSummary: string): Promise<Reading> {
   // placed in the URL: query strings leak into proxy logs, browser history and
   // error reports, which would expose the key. If a native Qianfan flow ever
   // genuinely needs an `access_token`, fetch it as a short-lived token from the
-  // token endpoint — never by putting the API key in the URL.
+  // token endpoint â€” never by putting the API key in the URL.
   const res = await fetch(`${QIANFAN_BASE}/${model}`, {
     method: "POST",
     headers: {
@@ -63,7 +63,8 @@ export async function baiduReading(chartSummary: string): Promise<Reading> {
     throw new Error(`Baidu request failed (${res.status} ${res.statusText}): ${body}`);
   }
 
-  const payload = (await res.json()) as {
+  const resClone = res.clone();
+  const payload = (await resClone.json()) as {
     choices?: { message?: { content?: unknown } }[];
     result?: unknown;
   };

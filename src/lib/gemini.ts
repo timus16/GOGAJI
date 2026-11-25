@@ -1,9 +1,9 @@
-/**
+﻿/**
  * The reading layer: one canonical prompt, one strict JSON shape, and the
  * provider adapters that produce it.
  *
- * Every provider (Gemini, OpenRouter, Baidu) is given the SAME prompt built by
- * `buildReadingPrompt()` and every provider's answer is forced through the
+ * Every provider (Gemini) is given the SAME prompt built by
+ * `buildReadingPrompt()` and every provider'"'"'s answer is forced through the
  * SAME validator `sanitizeReading()`, so the shape the UI receives is
  * identical no matter which model answered.
  *
@@ -12,7 +12,7 @@
  * and the model is told to reason ONLY from those facts.
  */
 
-import { geminiKey } from "~/lib/server-key";
+import { geminiKey, type EnvLike } from "~/lib/env";
 import { openrouterReading } from "~/lib/openrouter";
 import { LIFE_AREAS } from "~/content/problems";
 
@@ -47,8 +47,7 @@ export interface Reading {
 /** Which provider answered. */
 export type ReadingProvider = "gemini" | "openrouter" | "baidu";
 
-/**
- * The closed vocabulary a reading may focus on. The domain layer
+/** The closed vocabulary a reading may focus on. The domain layer
  * (`~/content/problems`) owns the canonical list, so it is imported here
  * rather than re-declared (a literal copy could silently drift); the model
  * is only ever offered exactly these values.
@@ -58,28 +57,28 @@ const ALLOWED_LIFE_AREAS: readonly string[] = LIFE_AREAS;
 /** The Gemini model id that works with the current key. */
 const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-const GEMINI_TIMEOUT_MS = 45_000;
+const GEMINI_TIMEOUT_MS = 60_000;
 
 /* --------------------------------------------------------------- prompting */
 
 /**
  * THE canonical prompt. Every provider reuses it verbatim so the model sees
- * identical instructions no matter which one answers. Keep it tight — this is
+ * identical instructions no matter which one answers. Keep it tight - this is
  * the single biggest token cost in the request.
  */
 export function buildReadingPrompt(chartSummary: string, focusAreas?: string[]): string {
   const focusLine =
     focusAreas && focusAreas.length
-      ? `\nQUERENT'S STATED FOCUS: ${focusAreas.join(", ")}. Weight the interpretation and the remedies toward these areas without ignoring contraindications.\n`
+      ? `\nQUERENT'"'"'S STATED FOCUS: ${focusAreas.join(", ")}. Weight the interpretation and the remedies toward these areas without ignoring contraindications.\n`
       : "";
   return `You are a learned Vedic astrologer and a devotional guide. Reason ONLY from the chart facts supplied below: never calculate, recall or invent a planetary position, a sign, a nakshatra or a deity that is not written in the facts.
 ${focusLine}
 CHART FACTS (the only source of truth):
 ${chartSummary}
 
-Voice: compassionate and devotional. Name the person's condition honestly, then help them overcome it. Be practical and specific. Never fatalistic, never alarming, never medical, legal or financial advice, and never a prediction of death or disaster.
+Voice: compassionate and devotional. Name the person'"'"'s condition honestly, then help them overcome it. Be practical and specific. Never fatalistic, never alarming, never medical, legal or financial advice, and never a prediction of death or disaster.
 
-Answer with STRICT JSON only — no markdown, no code fences, no text before or after — shaped exactly like this:
+Answer with STRICT JSON only - no markdown, no code fences, no text before or after - shaped exactly like this:
 {
   "condition": "<one sentence naming the main condition, at most 12 words>",
   "primary": ["<life area>"],
@@ -101,7 +100,6 @@ Answer with STRICT JSON only — no markdown, no code fences, no text before or 
     "motifs": "<symbols and forms to draw, 3 to 6 words>",
     "inscription": "<a short sacred line for the artwork>"
   }
-}
 
 Rules:
 - "primary" may contain only these values: ${ALLOWED_LIFE_AREAS.join(", ")}. Give 1 to 3 of them.
@@ -204,7 +202,7 @@ export function parseJsonPayload(text: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // not bare JSON — keep looking
+    // not bare JSON ? keep looking
   }
 
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -212,7 +210,7 @@ export function parseJsonPayload(text: string): unknown {
     try {
       return JSON.parse(fenced[1].trim());
     } catch {
-      // malformed fence — try the brace slice
+      // malformed fence ? try the brace slice
     }
   }
 
@@ -222,7 +220,7 @@ export function parseJsonPayload(text: string): unknown {
     try {
       return JSON.parse(trimmed.slice(first, last + 1));
     } catch {
-      // not a JSON object either — fall through to the error
+      // not a JSON object either ? fall through to the error
     }
   }
 
@@ -245,12 +243,18 @@ export function isUsableReading(reading: Reading | null): reading is Reading {
 
 /* ----------------------------------------------------------------- providers */
 
+
+
 /**
  * Gemini: one real HTTP call to the Generative Language API. No stubbing, no
- * simulated answers — if the call fails, the error travels up the chain.
+ * simulated answers - if the call fails, the error travels up the chain.
  */
-export async function geminiReading(chartSummary: string, keyOverride?: string): Promise<Reading> {
-  const key = geminiKey(keyOverride);
+export async function geminiReading(
+  chartSummary: string,
+  keyOverride?: string,
+  env?: EnvLike,
+): Promise<Reading> {
+  const key = geminiKey(keyOverride, env);
   const prompt = buildReadingPrompt(chartSummary);
 
   const res = await fetch(GEMINI_ENDPOINT, {
@@ -300,7 +304,7 @@ export async function geminiReading(chartSummary: string, keyOverride?: string):
  * exact fact sheet. It stops an identical chart from re-hitting the provider
  * chain, whose calls cost real tokens. It is bounded to 200 entries with a
  * 24h TTL and lives only in this process: not shared, not persisted, and it
- * never caches a failure — only a fully validated reading is stored.
+ * never caches a failure - only a fully validated reading is stored.
  */
 const READING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const READING_CACHE_MAX = 200;
@@ -336,13 +340,13 @@ function cacheReading(
 }
 
 /**
- * The reading chain: a cache hit first, then Gemini, OpenRouter, Baidu. Every
- * step is a real call. If all three fail, one error naming all three causes is
- * thrown so the caller can report one readable line.
+ * The reading chain: a cache hit first, then Gemini. If it fails, try OpenRouter.
+ * If both fail, throw error with both failures.
  */
 export async function readKundli(
   chartSummary: string,
   keyOverrides?: { gemini?: string; openrouter?: string },
+  env?: EnvLike,
 ): Promise<{ reading: Reading; provider: ReadingProvider }> {
   const cached = readCachedReading(chartSummary);
   if (cached) return cached;
@@ -350,7 +354,7 @@ export async function readKundli(
   const failures: string[] = [];
 
   try {
-    const reading = await geminiReading(chartSummary, keyOverrides?.gemini);
+    const reading = await geminiReading(chartSummary, keyOverrides?.gemini, env);
     cacheReading(chartSummary, reading, "gemini");
     return { reading, provider: "gemini" };
   } catch (err) {
@@ -358,13 +362,17 @@ export async function readKundli(
   }
 
   try {
-    const reading = await openrouterReading(chartSummary, keyOverrides?.openrouter);
+    const reading = await openrouterReading(chartSummary, keyOverrides?.openrouter, env);
     cacheReading(chartSummary, reading, "openrouter");
     return { reading, provider: "openrouter" };
   } catch (err) {
     failures.push(`openrouter: ${errorMessage(err)}`);
   }
 
-// Baidu provider exists in src/lib/baidu.ts but is not in the active chain — re-add here when BAIDU_API_KEY is configured.
-  throw new Error(`No reading provider could answer — ${failures.join(" | ")}`);
+  // Baidu provider exists in src/lib/baidu.ts but is not in the active chain.
+  throw new Error(`No reading provider could answer: ${failures.join(" | ")}`);
 }
+
+
+
+

@@ -15,6 +15,7 @@ import { dms, rashiOf } from "~/lib/astro";
 import {
   GRAHAS, NAKSHATRAS, presetById, type MotifKey, type StylePreset,
 } from "~/content/vedic-mapping";
+import { REGIONAL_SYSTEMS, type RegionalSystem } from "~/lib/regional-calculations";
 import {
   houseBhavaName, lifeAreaProfiles, type EmblemKey, type LifeAreaProfile,
 } from "~/content/life-areas";
@@ -23,7 +24,17 @@ const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/** Minify SVG by removing unnecessary whitespace and comments. */
+const minifySvg = (svg: string): string =>
+  svg
+    .replace(/<!--[\s\S]*?-->/g, "") // remove comments
+    .replace(/\s+/g, " ") // collapse whitespace
+    .replace(/>\s+</g, "><") // remove whitespace between tags
+    .replace(/\s+$/g, "") // trim trailing
+    .trim();
+
 const DEV = "'Noto Sans Devanagari', serif";
+const DISPLAY = "'Cinzel', serif";
 
 /**
  * Cap a font size so a text run is estimated to fit `maxWidth`. The advance is
@@ -82,6 +93,8 @@ export interface WallpaperOptions {
    * mistaken for somebody's real kundli.
    */
   sample?: boolean;
+  /** Optional regional calculation system (e.g., "tamil", "bengali", "malayalam", "north-indian", "south-indian", "vedic") */
+  regionalSystem?: string;
 }
 
 /* ------------------------------------------------------------------ motifs */
@@ -387,7 +400,7 @@ function kundli(
   // the "whole-sign houses" caption now sits on a baseline of its own just above
   // the square, so the footer beneath the square never competes with it.
   out += `<text x="${x + S / 2}" y="${y - S * 0.055}" fill="${soft}" font-size="${S * 0.042}" text-anchor="middle"
-    letter-spacing="${S * 0.004}" font-family="${DEV}">LAGNA ${esc(rashiOf(ch.lagna.signIndex).name.toUpperCase())} · WHOLE-SIGN HOUSES</text>`;
+    letter-spacing="${S * 0.004}" font-family="${DEV}" style="font-optical-sizing: auto">LAGNA ${esc(rashiOf(ch.lagna.signIndex).name.toUpperCase())} · WHOLE-SIGN HOUSES</text>`;
   // the focus bhava: a soft glow and a bright ring around the house the
   // querent's area governs. The planet glyphs inside are left exactly as the
   // engine produced them - the ring only says WHICH house the poster is about.
@@ -415,11 +428,11 @@ function kundli(
     const names = ch.houses[h].planets.map((k) => GRAHAS[k].symbol).join(" ");
     const size = signSize(h);
     const hl = lit.get(h + 1);
-    out += `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" font-family="${DEV}"
+    out += `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" font-family="${DEV}" style="font-optical-sizing: auto"
       font-size="${size.toFixed(1)}"><tspan fill="${hl ? hl.colour : soft}">${sign}</tspan>${names ? ` <tspan fill="${colour}">${esc(names)}</tspan>` : ""}</text>`;
     const lab = hl ? labels.get(h + 1) : undefined;
     if (hl && lab) {
-      out += `<text x="${lab.x.toFixed(1)}" y="${lab.y.toFixed(1)}" fill="${hl.colour}" font-size="${lab.size.toFixed(1)}" text-anchor="middle" font-family="${DEV}" opacity="0.95">${esc(hl.name)}</text>`;
+      out += `<text x="${lab.x.toFixed(1)}" y="${lab.y.toFixed(1)}" fill="${hl.colour}" font-size="${lab.size.toFixed(1)}" text-anchor="middle" font-family="${DEV}" style="font-optical-sizing: auto" opacity="0.95">${esc(hl.name)}</text>`;
     }
   }
   return out;
@@ -437,9 +450,9 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
   const sw = (Math.min(w, h) / 900) * preset.lineWeight;
 
   const nak = ch.moonNakshatra;
-  const dev = "'Noto Sans Devanagari', serif";
+  const dev = DEV;
   const display = preset.displayFont === "serif"
-    ? `'Cinzel', ${dev}` : `${dev}, system-ui, sans-serif`;
+    ? DISPLAY : `${DEV}, system-ui, sans-serif`;
   const upper = preset.uppercase ? (s: string) => s.toUpperCase() : (s: string) => s;
   const ls = preset.letterSpacing * (w / 1170);
 
@@ -546,7 +559,7 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
         const v = sq[r][cix];
         yantra += `<text x="${(yx + (cix + 0.5) * cell).toFixed(1)}" y="${(yy + (r + 0.55) * cell).toFixed(1)}"
           fill="${r === cix ? c.glow : ink}" font-size="${(cell * 0.42).toFixed(1)}" text-anchor="middle"
-          font-family="${dev}" opacity="${r === cix ? 1 : 0.92}">${v}</text>`;
+          font-family="${dev}" style="font-optical-sizing: auto" opacity="${r === cix ? 1 : 0.92}">${v}</text>`;
       }
     }
   } else {
@@ -715,27 +728,27 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
       body += emblemRow(focusAreas, focusAreas.map(areaColour), tx, mandalaBottom + fz(4) + badgeD / 2, badgeD, sw);
     }
     body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(28), headStr, fwFull, ls)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls}">${esc(headStr)}</text>`;
+      font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls}">${esc(headStr)}</text>`;
     y += fz(112);
     const devRx = Math.min(nak.devanagari.length * devSize * 0.42, fwFull * 0.55);
     body += `<ellipse cx="${tx}" cy="${(y - devSize * 0.30).toFixed(1)}" rx="${devRx.toFixed(1)}" ry="${(devSize * 0.95).toFixed(1)}" fill="url(#halo)"/>`;
     body += `<text x="${tx}" y="${y}" fill="${c.glow}" font-size="${devSize}" text-anchor="middle"
-      font-family="${dev}">${esc(nak.devanagari)}</text>`;
+      font-family="${dev}" style="font-optical-sizing: auto">${esc(nak.devanagari)}</text>`;
     y += fz(92);
     body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fz(48)}" text-anchor="middle"
-      font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
+      font-family="${dev}" style="font-optical-sizing: auto">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
     y += fz(54);
     body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), padaStr, fwFull, ls * 0.8)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.8}">${esc(padaStr)}</text>`;
+      font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.8}">${esc(padaStr)}</text>`;
     y += fz(72);
     body += `<text x="${tx}" y="${y}" fill="${ink}" font-size="${fz(44)}" text-anchor="middle"
-      font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
+      font-family="${dev}" style="font-optical-sizing: auto">${esc(g.mantra.devanagari)}</text>`;
     y += fz(50);
     body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(26), g.mantra.roman, fwFull)}" text-anchor="middle"
-      font-family="${dev}">${esc(g.mantra.roman)}</text>`;
+      font-family="${dev}" style="font-optical-sizing: auto">${esc(g.mantra.roman)}</text>`;
     y += fz(38);
     body += `<text x="${tx}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(20), g.mantra.gloss, fwFull)}" text-anchor="middle"
-      font-family="${dev}" opacity="0.85">${esc(g.mantra.gloss)}</text>`;
+      font-family="${dev}" style="font-optical-sizing: auto" opacity="0.85">${esc(g.mantra.gloss)}</text>`;
 
     const kundliTop = y + fz(52);
     /* The footer block is ALWAYS the birth line, the lagna tail and the
@@ -754,13 +767,20 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
     const note = upper(g.yantraNote);
     let fy = kundliTop + S + fz(36);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fwFull, ls * 0.7)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.7}">${esc(upper(birthLine))}</text>`;
+      font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.7}">${esc(upper(birthLine))}</text>`;
     fy += fz(28);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(19), lagnaTail, fwFull, ls * 0.5)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
+      font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
     fy += fz(26);
     body += `<text x="${tx}" y="${fy}" fill="${soft}" font-size="${fitGlyphs(fz(17), note, fwFull, ls * 0.4)}" text-anchor="middle"
-      font-family="${display}" letter-spacing="${ls * 0.4}" opacity="0.8">${esc(note)}</text>`;
+      font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.4}" opacity="0.8">${esc(note)}</text>`;
+    // Regional system badge
+    const regionalName = o.regionalSystem ? (REGIONAL_SYSTEMS.find(s => s.id === o.regionalSystem)?.name || o.regionalSystem.toUpperCase()) : "";
+    if (regionalName) {
+      fy += fz(20);
+      body += `<text x="${tx}" y="${fy}" fill="${rule}" font-size="${fitGlyphs(fz(16), "REGIONAL · " + regionalName.toUpperCase(), fwFull, ls * 0.4)}" text-anchor="middle"
+        font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.4}" opacity="0.75">${esc("REGIONAL · " + regionalName.toUpperCase())}</text>`;
+    }
     if (focus.length) {
       // the focus band: the area, its classical bhava, and the planets that
       // are actually in that house of this chart.
@@ -768,12 +788,12 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
       for (const band of focusBand) {
         fy += fz(26);
         body += `<text x="${tx}" y="${fy}" fill="${band.colour}" font-size="${fitGlyphs(fz(20), band.text, fwFull, ls * 0.5)}" text-anchor="middle"
-          font-family="${display}" letter-spacing="${ls * 0.5}">${esc(band.text)}</text>`;
+          font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.5}">${esc(band.text)}</text>`;
       }
       if (focusExtra) {
         fy += fz(20);
         body += `<text x="${tx}" y="${fy}" fill="${focusColour}" font-size="${fitGlyphs(fz(15), focusExtra, fwFull, ls * 0.4)}" text-anchor="middle"
-          font-family="${display}" letter-spacing="${ls * 0.4}" opacity="0.85">${esc(focusExtra)}</text>`;
+          font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls * 0.4}" opacity="0.85">${esc(focusExtra)}</text>`;
       }
     }
 
@@ -786,21 +806,21 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
     const headStr = upper("Moon in " + nak.name + " · pada " + ch.moonPada + " · " + rashiOf(ch.moonSign).name);
     const devSize = fz(66);
     let y = h * 0.235;
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(28), headStr, fwCol, ls * 0.6)}" font-family="${display}"
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fitGlyphs(fz(28), headStr, fwCol, ls * 0.6)}" font-family="${display}" style="font-optical-sizing: auto"
       letter-spacing="${ls * 0.6}">${esc(headStr)}</text>`;
     y += focus.length ? fz(72) : fz(92);
     const devRx = Math.min(nak.devanagari.length * devSize * 0.42, fwCol * 0.7);
     body += `<ellipse cx="${(x0 + devRx * 0.5).toFixed(1)}" cy="${(y - devSize * 0.30).toFixed(1)}" rx="${devRx.toFixed(1)}" ry="${(devSize * 0.95).toFixed(1)}" fill="url(#halo)"/>`;
-    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${devSize}" font-family="${dev}">${esc(nak.devanagari)}</text>`;
+    body += `<text x="${x0}" y="${y}" fill="${c.glow}" font-size="${devSize}" font-family="${dev}" style="font-optical-sizing: auto">${esc(nak.devanagari)}</text>`;
     y += focus.length ? fz(60) : fz(80);
-    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(36)}" font-family="${dev}">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
+    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fz(36)}" font-family="${dev}" style="font-optical-sizing: auto">${esc(nak.syllables[ch.moonPada - 1])}</text>`;
     const padaCap = upper(nak.syllablesRoman[ch.moonPada - 1] + " · " + nak.deityRoman);
-    body += `<text x="${x0 + fz(50)}" y="${y - fz(4)}" fill="${soft}" font-size="${fitGlyphs(fz(21), padaCap, fwCol - fz(58), ls * 0.6)}" font-family="${display}"
+    body += `<text x="${x0 + fz(50)}" y="${y - fz(4)}" fill="${soft}" font-size="${fitGlyphs(fz(21), padaCap, fwCol - fz(58), ls * 0.6)}" font-family="${display}" style="font-optical-sizing: auto"
       letter-spacing="${ls * 0.6}">${esc(padaCap)}</text>`;
     y += focus.length ? fz(42) : fz(52);
-    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(32)}" font-family="${dev}">${esc(g.mantra.devanagari)}</text>`;
+    body += `<text x="${x0}" y="${y}" fill="${ink}" font-size="${fz(32)}" font-family="${dev}" style="font-optical-sizing: auto">${esc(g.mantra.devanagari)}</text>`;
     y += focus.length ? fz(34) : fz(44);
-    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), g.mantra.roman, fwCol)}" font-family="${dev}">${esc(g.mantra.roman)}</text>`;
+    body += `<text x="${x0}" y="${y}" fill="${soft}" font-size="${fitGlyphs(fz(22), g.mantra.roman, fwCol)}" font-family="${dev}" style="font-optical-sizing: auto">${esc(g.mantra.roman)}</text>`;
     y += focus.length ? fz(26) : fz(30);
     const kundliTop = y;
     // the focus band runs across the foot of the right-hand column, so the
@@ -812,9 +832,9 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
     const fx = x0 + S + fz(40);
     const fw = right - fx;
     const lagnaTail = `LAGNA ${rashiOf(ch.lagna.signIndex).name} ${dms(ch.lagna.degreeInSign)} · RULING PLANET ${g.name}`;
-    body += `<text x="${fx}" y="${kundliTop + fz(46)}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fw, ls * 0.6)}" font-family="${display}"
+    body += `<text x="${fx}" y="${kundliTop + fz(46)}" fill="${soft}" font-size="${fitGlyphs(fz(22), birthLine, fw, ls * 0.6)}" font-family="${display}" style="font-optical-sizing: auto"
       letter-spacing="${ls * 0.6}">${esc(upper(birthLine))}</text>`;
-    body += `<text x="${fx}" y="${kundliTop + fz(78)}" fill="${soft}" font-size="${fitGlyphs(fz(20), lagnaTail, fw, ls * 0.5)}" font-family="${display}"
+    body += `<text x="${fx}" y="${kundliTop + fz(78)}" fill="${soft}" font-size="${fitGlyphs(fz(20), lagnaTail, fw, ls * 0.5)}" font-family="${display}" style="font-optical-sizing: auto"
       letter-spacing="${ls * 0.5}" opacity="0.85">${esc(upper(lagnaTail))}</text>`;
     // the note is wrapped at the size it is PRINTED at, so a wrapped line can
     // never be wider than the column it lives in.
@@ -822,9 +842,16 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
     const noteLines = wrapToWidth(noteSize, upper(g.yantraNote), fw);
     let ny = kundliTop + fz(112);
     for (const ln of noteLines) {
-      body += `<text x="${fx}" y="${ny}" fill="${soft}" font-size="${fitGlyphs(noteSize, ln, fw)}" font-family="${display}"
+      body += `<text x="${fx}" y="${ny}" fill="${soft}" font-size="${fitGlyphs(noteSize, ln, fw)}" font-family="${display}" style="font-optical-sizing: auto"
         opacity="0.8">${esc(ln)}</text>`;
       ny += fz(18);
+    }
+    // Regional system badge
+    const regionalName = o.regionalSystem ? (REGIONAL_SYSTEMS.find(s => s.id === o.regionalSystem)?.name || o.regionalSystem.toUpperCase()) : "";
+    if (regionalName) {
+      ny += fz(20);
+      body += `<text x="${fx}" y="${ny}" fill="${rule}" font-size="${fitGlyphs(fz(16), "REGIONAL · " + regionalName.toUpperCase(), fw, ls * 0.4)}" font-family="${display}" style="font-optical-sizing: auto"
+        letter-spacing="${ls * 0.4}" opacity="0.75">${esc("REGIONAL · " + regionalName.toUpperCase())}</text>`;
     }
     if (focus.length) {
       // the emblem badge sits in the free space at the top of the right-hand
@@ -839,12 +866,12 @@ export function buildWallpaperSvg(o: WallpaperOptions): string {
       const bandFont = Math.min(fz(20), bandStep * 0.82);
       let by = bandTop;
       for (const band of focusBand) {
-        body += `<text x="${x0}" y="${by}" fill="${band.colour}" font-size="${fitGlyphs(bandFont, band.text, fwCol, ls * 0.4)}" font-family="${display}"
+        body += `<text x="${x0}" y="${by}" fill="${band.colour}" font-size="${fitGlyphs(bandFont, band.text, fwCol, ls * 0.4)}" font-family="${display}" style="font-optical-sizing: auto"
           letter-spacing="${ls * 0.4}">${esc(band.text)}</text>`;
         by += bandStep;
       }
       if (focusExtra) {
-        body += `<text x="${x0}" y="${by}" fill="${focusColour}" font-size="${fitGlyphs(Math.min(bandFont, fz(15)), focusExtra, fwCol, ls * 0.4)}" font-family="${display}"
+        body += `<text x="${x0}" y="${by}" fill="${focusColour}" font-size="${fitGlyphs(Math.min(bandFont, fz(15)), focusExtra, fwCol, ls * 0.4)}" font-family="${display}" style="font-optical-sizing: auto"
           letter-spacing="${ls * 0.4}" opacity="0.85">${esc(focusExtra)}</text>`;
         by += bandStep;
       }
@@ -870,7 +897,7 @@ const cornerMotifs = preset.cornerMotifs
       .join("") : "";
 
   const xlinkNs = hasArt ? ` xmlns:xlink="http://www.w3.org/1999/xlink"` : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg"${xlinkNs} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="${o.className ?? ""}">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"${xlinkNs} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="${o.className ?? ""}">
   <defs>
     <style>${o.fontFaceCss ?? ""}</style>
     <linearGradient id="bg" gradientTransform="rotate(${preset.bg.angle - 90} 0.5 0.5)">
@@ -933,10 +960,11 @@ const cornerMotifs = preset.cornerMotifs
   ${nameHalo}
   ${motif}
   <text x="${nameText.x}" y="${nameText.y}" fill="${ink}" font-size="${nameText.size}" text-anchor="${nameText.anchor}"
-    font-family="${display}" letter-spacing="${ls}" font-weight="600">${name}</text>
+    font-family="${display}" style="font-optical-sizing: auto" letter-spacing="${ls}" font-weight="600">${name}</text>
   ${body}
   <rect width="${w}" height="${h}" fill="url(#vig)"/>
 </svg>`;
+  return minifySvg(svg);
 }
 
 /** Filename for a download, based on the person's own name. */
@@ -949,3 +977,6 @@ export function wallpaperFilename(ch: Chart, width: number, height: number): str
 
 /** Re-exported so callers can label the wallpaper without importing two modules. */
 export { NAKSHATRAS };
+
+
+

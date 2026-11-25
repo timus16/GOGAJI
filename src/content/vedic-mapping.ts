@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ============================================================================
  * PROVISIONAL VEDIC CONTENT — PENDING DOMAIN REVIEW
  * ============================================================================
@@ -60,8 +60,8 @@ export type PlanetKey =
 
 export type MotifKey =
   | "horse" | "yoni" | "flame" | "chariot" | "deer" | "drop" | "bow" | "lotus"
-  | "serpent" | "throne" | "cot" | "hand" | "jewel" | "sprout" | "arch" | "ear"
-  | "roots" | "fan" | "tusk" | "drum" | "circle" | "sword" | "twins" | "fish";
+  | "serpent" | "throne" | "cot" | "bed" | "hand" | "jewel" | "earring" | "sprout" | "arch" | "ear" | "footprints"
+  | "roots" | "fan" | "tusk" | "drum" | "circle" | "sword" | "twins" | "fish" | "lotus-bud";
 
 export interface Graha {
   key: PlanetKey;
@@ -327,17 +327,17 @@ const NAK_ROWS: NRow[] = [
   ["Āśleṣā", "आश्लेषा", "mercury", "Nāgas", "Nagas (serpents)", "coiled serpent", "serpent", "Rakshasa", "डी|डू|डे|डो", "Di|Du|De|Do"],
   ["Maghā", "मघा", "ketu", "Pitṛs", "Pitris (ancestors)", "royal throne", "throne", "Rakshasa", "मा|मी|मू|मे", "Ma|Mi|Mu|Me"],
   ["Pūrva Phalgunī", "पूर्व फाल्गुनी", "venus", "Bhaga", "Bhaga", "front legs of a bed", "cot", "Manushya", "मो|टा|टी|टू", "Mo|Ta|Ti|Tu"],
-  ["Uttara Phalgunī", "उत्तर फाल्गुनी", "sun", "Aryaman", "Aryaman", "back legs of a bed", "cot", "Manushya", "टे|टो|पा|पी", "Te|To|Pa|Pi"],
+  ["Uttara Phalgunī", "उत्तर फाल्गुनी", "sun", "Aryaman", "Aryaman", "back legs of a bed", "bed", "Manushya", "टे|टो|पा|पी", "Te|To|Pa|Pi"],
   ["Hasta", "हस्त", "moon", "Savitṛ", "Savitar", "hand", "hand", "Deva", "पू|ष|ण|ठ", "Pu|Sha|Na|Tha"],
   ["Citrā", "चित्रा", "mars", "Tvaṣṭṛ", "Tvashtar (Vishwakarma)", "bright jewel", "jewel", "Rakshasa", "पे|पो|रा|री", "Pe|Po|Ra|Ri"],
   ["Svātī", "स्वाती", "rahu", "Vāyu", "Vayu", "young sprout in the wind", "sprout", "Deva", "रू|रे|रो|ता", "Ru|Re|Ro|Ta"],
   ["Viśākhā", "विशाखा", "jupiter", "Indrāgni", "Indragni", "triumphal arch", "arch", "Rakshasa", "ती|तू|ते|तो", "Ti|Tu|Te|To"],
-  ["Anurādhā", "अनुराधा", "saturn", "Mitra", "Mitra", "lotus", "lotus", "Deva", "ना|नी|नू|ने", "Na|Ni|Nu|Ne"],
-  ["Jyeṣṭhā", "ज्येष्ठा", "mercury", "Indra", "Indra", "earring or umbrella", "jewel", "Rakshasa", "नो|या|यी|यू", "No|Ya|Yi|Yu"],
+  ["Anurādhā", "अनुराधा", "saturn", "Mitra", "Mitra", "lotus", "lotus-bud", "Deva", "ना|नी|नू|ने", "Na|Ni|Nu|Ne"],
+  ["Jyeṣṭhā", "ज्येष्ठा", "mercury", "Indra", "Indra", "earring or umbrella", "earring", "Rakshasa", "नो|या|यी|यू", "No|Ya|Yi|Yu"],
   ["Mūla", "मूल", "ketu", "Nirṛti", "Nirriti", "bunch of tied roots", "roots", "Rakshasa", "ये|यो|भा|भी", "Ye|Yo|Bha|Bhi"],
   ["Pūrva Āṣāḍhā", "पूर्व आषाढा", "venus", "Āpas", "Apas (the waters)", "winnowing fan", "fan", "Manushya", "भू|धा|फा|ढा", "Bhu|Dha|Pha|Dha"],
   ["Uttara Āṣāḍhā", "उत्तर आषाढा", "sun", "Viśvedevās", "Vishvedevas", "elephant tusk", "tusk", "Manushya", "भे|भो|जा|जी", "Bhe|Bho|Ja|Ji"],
-  ["Śravaṇa", "श्रवण", "moon", "Viṣṇu", "Vishnu", "three footprints", "ear", "Deva", "खी|खू|खे|खो", "Khi|Khu|Khe|Kho"],
+  ["Śravaṇa", "श्रवण", "moon", "Viṣṇu", "Vishnu", "three footprints", "footprints", "Deva", "खी|खू|खे|खो", "Khi|Khu|Khe|Kho"],
   ["Dhaniṣṭhā", "धनिष्ठा", "mars", "Vasus", "Vasus", "drum", "drum", "Rakshasa", "गा|गी|गु|गे", "Ga|Gi|Gu|Ge"],
   ["Śatabhiṣā", "शतभिषा", "rahu", "Varuṇa", "Varuna", "empty circle", "circle", "Rakshasa", "गो|सा|सी|सू", "Go|Sa|Si|Su"],
   ["Pūrva Bhādrapadā", "पूर्व भाद्रपदा", "jupiter", "Aja Ekapāda", "Aja Ekapada", "sword", "sword", "Manushya", "से|सो|दा|दी", "Se|So|Da|Di"],
@@ -379,6 +379,94 @@ export const RASHIS: { name: string; devanagari: string; english: string; lord: 
   { name: "Kumbha", devanagari: "कुम्भ", english: "Aquarius", lord: "saturn" },
   { name: "Mīna", devanagari: "मीन", english: "Pisces", lord: "jupiter" },
 ];
+
+/* -------------------------------------------------------- problem area mantras */
+
+export type ProblemArea = 
+  | "career" 
+  | "wealth" 
+  | "relationships" 
+  | "health" 
+  | "education" 
+  | "spiritual" 
+  | "protection" 
+  | "family";
+
+export interface ProblemAreaMantra {
+  area: ProblemArea;
+  devanagari: string;
+  roman: string;
+  gloss: string;
+  planet: PlanetKey;
+}
+
+/**
+ * Mantras for each life area (problem area).
+ * Each area is associated with its primary ruling planet's bija mantra.
+ * The Devanagari and Roman transliterations follow the same format as graha mantras.
+ */
+export const PROBLEM_AREA_MANTRAS: Record<ProblemArea, ProblemAreaMantra> = {
+  career: {
+    area: "career",
+    devanagari: "ॐ ह्रां ह्रीं ह्रौं सः सूर्याय नमः",
+    roman: "Oṃ hrāṃ hrīṃ hrauṃ saḥ sūryāya namaḥ",
+    gloss: "Oṃ — salutations to Sūrya, for career and recognition.",
+    planet: "sun",
+  },
+  wealth: {
+    area: "wealth",
+    devanagari: "ॐ द्रां द्रीं द्रौं सः शुक्राय नमः",
+    roman: "Oṃ drāṃ drīṃ drauṃ saḥ śukrāya namaḥ",
+    gloss: "Oṃ — salutations to Śukra, for abundance and prosperity.",
+    planet: "venus",
+  },
+  relationships: {
+    area: "relationships",
+    devanagari: "ॐ श्रां श्रीं श्रौं सः चन्द्राय नमः",
+    roman: "Oṃ śrāṃ śrīṃ śrauṃ saḥ candrāya namaḥ",
+    gloss: "Oṃ — salutations to Candra, for harmony in relationships.",
+    planet: "moon",
+  },
+  health: {
+    area: "health",
+    devanagari: "ॐ क्रां क्रीं क्रौं सः भौमाय नमः",
+    roman: "Oṃ krāṃ krīṃ krauṃ saḥ bhaumāya namaḥ",
+    gloss: "Oṃ — salutations to Bhauma (Maṅgala), for vitality and health.",
+    planet: "mars",
+  },
+  education: {
+    area: "education",
+    devanagari: "ॐ ब्रां ब्रीं ब्रौं सः बुधाय नमः",
+    roman: "Oṃ brāṃ brīṃ brauṃ saḥ budhāya namaḥ",
+    gloss: "Oṃ — salutations to Budha, for learning and wisdom.",
+    planet: "mercury",
+  },
+  spiritual: {
+    area: "spiritual",
+    devanagari: "ॐ ग्रां ग्रीं ग्रौं सः गुरवे नमः",
+    roman: "Oṃ grāṃ grīṃ grauṃ saḥ gurave namaḥ",
+    gloss: "Oṃ — salutations to Guru (Bṛhaspati), for spiritual growth.",
+    planet: "jupiter",
+  },
+  protection: {
+    area: "protection",
+    devanagari: "ॐ प्रां प्रीं प्रौं सः शनये नमः",
+    roman: "Oṃ prāṃ prīṃ prauṃ saḥ śanaye namaḥ",
+    gloss: "Oṃ — salutations to Śani, for protection and boundaries.",
+    planet: "saturn",
+  },
+  family: {
+    area: "family",
+    devanagari: "ॐ ग्रां ग्रीं ग्रौं सः गुरवे नमः",
+    roman: "Oṃ grāṃ grīṃ grauṃ saḥ gurave namaḥ",
+    gloss: "Oṃ — salutations to Guru (Bṛhaspati), for family blessings.",
+    planet: "jupiter",
+  },
+};
+
+export function getProblemAreaMantra(area: ProblemArea): ProblemAreaMantra {
+  return PROBLEM_AREA_MANTRAS[area] ?? PROBLEM_AREA_MANTRAS.career;
+}
 
 /* ------------------------------------------------------------- style presets */
 

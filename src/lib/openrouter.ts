@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OpenRouter fallback reading provider.
  *
  * OpenRouter is an OpenAI-compatible gateway: it proxies many models behind
@@ -10,7 +10,7 @@
  * identical whichever provider answered.
  */
 
-import { openrouterKey } from "~/lib/server-key";
+import { openrouterKey } from "~/lib/env";
 import {
   buildReadingPrompt,
   sanitizeReading,
@@ -40,7 +40,7 @@ const MAX_ATTEMPTS = 3;
  *
  * The second block is the well-known free tier asked for in the brief. The
  * catalogue no longer lists those exact ids at zero price, so they are kept
- * as a later tier in case OpenRouter restores them — they cost nothing to
+ * as a later tier in case OpenRouter restores them â€” they cost nothing to
  * try and the chain stops after three attempts either way.
  */
 export const OPENROUTER_FALLBACK_MODELS: string[] = [
@@ -152,5 +152,5 @@ export async function openrouterReading(chartSummary: string, keyOverride?: stri
     return reading;
   }
 
-  throw new Error(`OpenRouter could not answer — ${failures.join(" | ")}`);
+  throw new Error(`OpenRouter could not answer â€” ${failures.join(" | ")}`);
 }

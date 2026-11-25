@@ -65,6 +65,18 @@ export const LIFE_AREAS: readonly LifeArea[] = [
   "family",
 ] as const;
 
+/** Human-readable labels for each life area. */
+export const AREA_LABELS: Record<LifeArea, string> = {
+  career: "Career & work",
+  wealth: "Wealth & finances",
+  relationships: "Relationships",
+  health: "Health & vitality",
+  education: "Education & study",
+  spiritual: "Spiritual growth",
+  protection: "Protection",
+  family: "Family & home",
+};
+
 /** One detected condition — a traditional description of a placement. */
 export interface AstroCondition {
   /** stable machine key, e.g. "mangal-dosha" */

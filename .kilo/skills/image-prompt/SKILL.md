@@ -1,4 +1,4 @@
----
+﻿---
 name: image-prompt
 description: Generates optimized text-to-image prompts for NVIDIA flux.1-dev. Pure prompt engineering - no advice, no reading. Triggers when wallpaper context and chart facts are available. max_tokens: 250.
 version: 1.0
@@ -76,7 +76,40 @@ Temple Gold Vedic cosmic wallpaper, ascending confidence energy, divine sun lion
 
 1. From the context.symbols array (take up to 3)
 2. Add planet-specific symbol if focus planet is in context
-3. NEVER add text or readable elements
+3. Add nakshatra motif symbol from the 27 classical motifs
+4. NEVER add text or readable elements
+
+## Nakshatra Motif Symbols (from vedic-mapping.ts MotifKey)
+
+| Nakshatra | Motif | Symbol |
+|---|---|---|
+| Ashwini | horse | horse head, stallion |
+| Bharani | yoni | yoni, womb |
+| Krittika | flame | razor, flame, knife |
+| Rohini | chariot | ox-cart, chariot |
+| Mrigashira | deer | deer, antelope |
+| Ardra | drop | teardrop, drop |
+| Punarvasu | bow | bow, quiver |
+| Pushya | lotus | cow udder, lotus |
+| Ashlesha | serpent | coiled serpent, naga |
+| Magha | throne | royal throne, palanquin |
+| Purva Phalguni | cot | bed, couch |
+| Uttara Phalguni | cot | bed, back legs |
+| Hasta | hand | open hand, palm |
+| Chitra | jewel | bright jewel, pearl |
+| Swati | sprout | young sprout, coral |
+| Vishakha | arch | triumphal arch, gateway |
+| Anuradha | lotus | lotus flower |
+| Jyeshtha | jewel | earring, umbrella |
+| Mula | roots | tied roots, bunch |
+| Purva Ashadha | fan | winnowing fan |
+| Uttara Ashadha | tusk | elephant tusk |
+| Shravana | ear | three footprints, ear |
+| Dhanishtha | drum | drum, flute |
+| Shatabhisha | circle | empty circle, 1000-petaled |
+| Purva Bhadrapada | sword | sword, two-faced |
+| Uttara Bhadrapada | twins | twins, serpent pair |
+| Revati | fish | fish, drum |
 
 ## NO_TEXT_CLAUSE (ALWAYS REQUIRED)
 
@@ -89,6 +122,7 @@ This is non-negotiable. The deterministic renderer adds Devanagari mantras on to
 
 - Prompt structure follows `src/lib/nvidia.ts` promptFromBrief() logic
 - Style presets from `src/content/vedic-mapping.ts` PRESETS[]
+- Nakshatra motifs from `src/content/vedic-mapping.ts` NAKSHATRAS[].motif
 - NEVER invent style names or preset names
 
 ## Memory Rules

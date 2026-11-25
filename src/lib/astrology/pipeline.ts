@@ -5,7 +5,7 @@ import { readKundli, type Reading } from '~/lib/gemini'
 
 export async function generateInternalReport(
   birthData: { date: string; time: string; latitude: number; longitude: number; timezone: string },
-  focusAreas: string[],
+  focusArea: string,
   regional: { state: string; language: string }
 ): Promise<{ chart: Chart; report: InternalAstrologyReport }> {
   const input: BirthInput = {
@@ -19,12 +19,12 @@ export async function generateInternalReport(
   }
 
   const chart = computeChart(input)
-  const report = generateInternalReport(input, focusAreas[0] || 'career', regional.state as any)
+  const report = generateInternalReport(input, focusArea, regional.state as any)
 
   return { chart, report }
 }
 
-export async function generateAIPrompt(report: InternalAstrologyReport): Promise<string> {
+export async function generateAIPrompt(report: InternalAstrologyReport, focusArea: string): Promise<string> {
   const reading = await readKundli(JSON.stringify(report))
   
   const promptInput: WallpaperPromptInput = {
@@ -39,7 +39,7 @@ export async function generateAIPrompt(report: InternalAstrologyReport): Promise
       rulingPlanet: report.lagnaLord,
       rulingColour: '',
     },
-    focusAreas: [report.problemAnalysis.area],
+    focusAreas: [focusArea],
   }
 
   return promptFromBrief(reading.reading, JSON.stringify(report), promptInput)

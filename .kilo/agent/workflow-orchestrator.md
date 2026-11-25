@@ -1,5 +1,5 @@
 ﻿---
-description: Workflow orchestrator. Executes the deterministic GOGAJI pipeline: birth details → kundli calculation → problem analysis → wallpaper context → image prompt → AI generation. State machine drives execution; never reasons, never plans, never researches.
+description: "Workflow orchestrator. Executes the deterministic GOGAJI pipeline: birth details to kundli calculation to problem analysis to wallpaper context to image prompt to AI generation. State machine drives execution; never reasons, never plans, never researches."
 mode: primary
 steps: 20
 ---

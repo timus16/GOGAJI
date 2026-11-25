@@ -1,27 +1,21 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getSession,
-  loginAuth,
-  logoutAuth,
-  registerAuth,
-  setPremium,
-  type SessionResponse,
-} from "~/server/api-auth";
+import { api } from "~/lib/api-client";
+import type { SessionResponse } from "~/server/api-auth";
+import { useToast } from "~/components/ui/Toast";
 
 export const Route = createFileRoute("/account")({
   component: AccountPage,
 });
 
 function AccountPage() {
+  const { toast, dismissAll } = useToast();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [bypassCode, setBypassCode] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [showBypassPrompt, setShowBypassPrompt] = useState(false);
@@ -33,8 +27,9 @@ function AccountPage() {
   async function checkSession() {
     setLoading(true);
     try {
-      const res = await getSession({ data: {} });
-      setSession(res);
+      const res = await api.post("/api/auth/session", {});
+      const sessionData = await res.json();
+      setSession(sessionData);
     } catch {
       setSession({ loggedIn: false, plan: "free", isPremium: false, quota: { used: 0, limit: 0, remaining: 0, authRequired: true } });
     } finally {
@@ -46,33 +41,31 @@ function AccountPage() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
-  function clearMessages() {
-    setError("");
-    setSuccess("");
+  function clearForm() {
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setBypassCode("");
+    dismissAll();
   }
 
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
-    clearMessages();
-    if (!validateEmail(email)) {
-      setError("Enter a valid email address.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
+    dismissAll();
+    if (!validateEmail(email)) { toast.error("Invalid email", "Enter a valid email address."); return; }
+    if (password.length < 8) { toast.error("Weak password", "Password must be at least 8 characters."); return; }
     setLoading(true);
     try {
-      const res = await loginAuth({ data: { email, password } });
-      if (res.ok) {
-        setSuccess("Signed in successfully.");
+      const res = await api.post("/api/auth/login", { email, password });
+      const result = await res.json();
+      if (result.ok) {
+        toast.success("Welcome back", "Signed in successfully.");
         await checkSession();
       } else {
-        setError(res.error);
+        toast.error("Sign in failed", result.error);
       }
     } catch {
-      setError("Something went wrong. Please try again.");
+      toast.error("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -80,68 +73,58 @@ function AccountPage() {
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
-    clearMessages();
-    if (!validateEmail(email)) {
-      setError("Enter a valid email address.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
+    dismissAll();
+    if (!validateEmail(email)) { toast.error("Invalid email", "Enter a valid email address."); return; }
+    if (password.length < 8) { toast.error("Weak password", "Password must be at least 8 characters."); return; }
+    if (password !== confirmPassword) { toast.error("Passwords don't match", "Please enter the same password twice."); return; }
     setLoading(true);
     try {
-      const res = await registerAuth({ data: { email, password } });
-      if (res.ok) {
-        setSuccess("Account created. You are now signed in.");
+      const res = await api.post("/api/auth/register", { email, password });
+      const result = await res.json();
+      if (result.ok) {
+        toast.success("Account created", "You are now signed in.");
         await checkSession();
       } else {
-        setError(res.error);
+        toast.error("Registration failed", result.error);
       }
     } catch {
-      setError("Something went wrong. Please try again.");
+      toast.error("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
   async function handleSignOut() {
-    clearMessages();
+    dismissAll();
     setLoading(true);
     try {
-      await logoutAuth();
+      await api.post("/api/auth/logout", {});
       setSession({ loggedIn: false, plan: "free", isPremium: false, quota: { used: 0, limit: 0, remaining: 0, authRequired: true } });
-      setSuccess("Signed out.");
+      toast.success("Signed out", "See you next time!");
     } catch {
-      setError("Could not sign out. Please try again.");
+      toast.error("Error", "Could not sign out. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
   async function handleActivatePremium() {
-    clearMessages();
-    if (!bypassCode.trim()) {
-      setError("Enter the activation code.");
-      return;
-    }
+    dismissAll();
+    if (!bypassCode.trim()) { toast.error("Missing code", "Enter the activation code."); return; }
     setLoading(true);
     try {
-      const res = await setPremium({ data: { code: bypassCode.trim() } });
-      if (res.ok) {
-        setSuccess("Premium activated.");
+      const res = await api.post("/api/auth/premium", { code: bypassCode.trim() });
+      const result = await res.json();
+      if (result.ok) {
+        toast.success("Premium activated", "Welcome to the premium tier!");
         setShowBypassPrompt(false);
         setBypassCode("");
         await checkSession();
       } else {
-        setError(res.error);
+        toast.error("Activation failed", result.error);
       }
     } catch {
-      setError("Something went wrong. Please try again.");
+      toast.error("Error", "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -240,7 +223,7 @@ function AccountPage() {
                       onClick={() => {
                         setShowBypassPrompt(false);
                         setBypassCode("");
-                        clearMessages();
+                        dismissAll();
                       }}
                       className="flex-1 px-4 py-3 rounded-2xl border border-neutral-700 bg-neutral-800 text-neutral-300 font-medium hover:bg-neutral-700 transition-colors"
                     >
@@ -255,17 +238,6 @@ function AccountPage() {
                       {loading ? "Activating…" : "Activate"}
                     </button>
                   </div>
-                </div>
-              )}
-
-              {error && (
-                <div className="text-center text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3" role="alert">
-                  {error}
-                </div>
-              )}
-              {success && (
-                <div className="text-center text-sm text-green-400 bg-green-500/10 border border-green-500/20 rounded-xl p-3" role="status">
-                  {success}
                 </div>
               )}
             </div>
@@ -327,12 +299,6 @@ function AccountPage() {
                   </div>
                 )}
 
-                {error && (
-                  <div className="text-center text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3" role="alert">
-                    {error}
-                  </div>
-                )}
-
                 <button
                   type="submit"
                   disabled={loading}
@@ -342,12 +308,6 @@ function AccountPage() {
                 </button>
               </form>
 
-              {success && (
-                <div className="text-center text-sm text-green-400 bg-green-500/10 border border-green-500/20 rounded-xl p-3" role="status">
-                  {success}
-                </div>
-              )}
-
               <p className="text-center text-sm text-neutral-500">
                 {mode === "signin" ? (
                   <>
@@ -356,10 +316,7 @@ function AccountPage() {
                       type="button"
                       onClick={() => {
                         setMode("signup");
-                        clearMessages();
-                        setEmail("");
-                        setPassword("");
-                        setConfirmPassword("");
+                        clearForm();
                       }}
                       className="text-amber-400 hover:text-amber-300 font-medium underline underline-offset-2"
                     >
@@ -373,10 +330,7 @@ function AccountPage() {
                       type="button"
                       onClick={() => {
                         setMode("signin");
-                        clearMessages();
-                        setEmail("");
-                        setPassword("");
-                        setConfirmPassword("");
+                        clearForm();
                       }}
                       className="text-amber-400 hover:text-amber-300 font-medium underline underline-offset-2"
                     >

@@ -1,5 +1,3 @@
-import { neon } from "@neondatabase/serverless";
-
 /**
  * Server-only handle to the team's database (Neon serverless Postgres over HTTP).
  * The connection string comes from `DATABASE_URL`, which the owner connects via
@@ -18,12 +16,22 @@ import { neon } from "@neondatabase/serverless";
  *     return rows.map((r) => ({ ...r, created_at: String(r.created_at) }));
  *   });
  */
-export const sql = () => {
+let neonPromise: Promise<typeof import("@neondatabase/serverless")> | null = null;
+
+function getNeon() {
+  if (!neonPromise) {
+    neonPromise = import("@neondatabase/serverless");
+  }
+  return neonPromise;
+}
+
+export const sql = async () => {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set — connect a database (via the database card) before running queries."
     );
   }
+  const { neon } = await getNeon();
   return neon(url);
 };

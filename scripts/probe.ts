@@ -1,8 +1,8 @@
-import { computeChart } from "../src/lib/astro";
+import { computeChartSync } from "../src/lib/astro";
 import { buildWallpaperSvg } from "../src/lib/wallpaper";
 const input = { name: "Asha", date: "1992-08-14", time: "05:45", place: "New Delhi", latitude: 28.6139, longitude: 77.209, timezone: "Asia/Kolkata" };
 try {
-  const chart = computeChart(input as any);
+  const chart = computeChartSync(input as any);
   console.log("CHART_OK", chart.moonNakshatra?.name, chart.moonPada, JSON.stringify(chart.lagna), chart.rulingPlanet);
   // These are the real preset ids from src/content/vedic-mapping.ts: an unknown
   // id makes presetById silently fall back to temple-gold, so a typo here would

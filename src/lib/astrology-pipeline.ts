@@ -10,11 +10,12 @@
  * 6. Internal Report - Generate full Vedic reading
  */
 
-import { computeChart, type Chart, type BirthInput, dms } from '~/lib/astro';
+import { computeChart, type Chart, type BirthInput, dms, vimshottariDasha } from '~/lib/astro';
 import { assessChart, chartFactSheet, type BirthChartConditions, LIFE_AREAS } from '~/content/problems';
 import { presetById, type StylePreset } from '~/content/vedic-mapping';
 import { computeRegionalChart, getRegionalNakshatraName, getRegionalDisplayName, type RegionalSystem } from '~/lib/regional-calculations';
-import { vimshottariDasha } from '~/lib/astro';
+
+const RASHIS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
 
 // ============================================================
 // INTERNAL ASTROLOGY REPORT
@@ -84,14 +85,9 @@ export interface PlanetaryPosition {
 }
 
 export interface DashaInfo {
-  current: string;
-  currentLord: string;
-  antardasha: string;
-  pratyantardasha: string;
-  balance: string;  // "2 years 6 months remaining"
-  next: string;
-  nextLord: string;
-  allDashas: { planet: string; startAge: number; endAge: number }[];
+  balance: { lord: string; lordDevanagari: string; yearsLeft: number };
+  periods: { lord: string; lordDevanagari: string; start: Date; end: Date; years: number }[];
+  provisionalNotes: string[];
 }
 
 export interface Yoga {
@@ -166,7 +162,7 @@ function detectYogas(chart: Chart): Yoga[] {
   const yogas: Yoga[] = [];
   
   // Sun-Moon conjunction (Sunjanya Yoga)
-  if (chart.sun.signIndex === chart.moon.signIndex) {
+  if (chart.sunSign === chart.moon.signIndex) {
     yogas.push({
       name: 'Sunjanya Yoga',
       description: 'Sun and Moon together in the same sign - balanced willpower and emotional intelligence',
@@ -177,7 +173,7 @@ function detectYogas(chart: Chart): Yoga[] {
   
   // Gajakesari (Jupiter aspects Moon from 5th, 7th, 9th, 11th)
   const moonSign = chart.moon.signIndex;
-  const jupiterSign = chart.planets.find(p => p.key === 'Jupiter')?.signIndex;
+  const jupiterSign = chart.planets.find(p => p.key === 'jupiter')?.signIndex;
   if (jupiterSign !== undefined) {
     const aspects = [(moonSign + 4) % 12, (moonSign + 6) % 12, (moonSign + 8) % 12, (moonSign + 10) % 12];
     if (aspects.includes(jupiterSign)) {
@@ -192,12 +188,12 @@ function detectYogas(chart: Chart): Yoga[] {
   
   // Debilitated planets cause yoga
   chart.planets.forEach(p => {
-    if (calculateDignity(p.key, p.signIndex === undefined ? '' : ['', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'][p.signIndex], chart) === 'debilitated') {
+    if (calculateDignity(p.key.charAt(0).toUpperCase() + p.key.slice(1), RASHIS[p.signIndex], chart) === 'debilitated') {
       yogas.push({
         name: `\${p.key} Debilitation Yoga`,
-        description: `\${p.key} is debilitated - requires remediation through gem/chanting`,
-        type: 'negative',
-        planets: [p.key],
+        name: `${p.key.charAt(0).toUpperCase() + p.key.slice(1)} Debilitation Yoga`,
+        description: `${p.key.charAt(0).toUpperCase() + p.key.slice(1)} is debilitated - requires remediation through gem/chanting`,
+        planets: [p.key.charAt(0).toUpperCase() + p.key.slice(1)],
       });
     }
   });
@@ -294,7 +290,7 @@ function analyzeProblem(chart: Chart, conditions: BirthChartConditions, problem:
   chart.planets.forEach(p => {
     const house = p.house;
     if (problemHouses.includes(house)) {
-      const dignity = calculateDignity(p.key, p.signIndex === undefined ? '' : ['', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'][p.signIndex], chart);
+      const dignity = calculateDignity(p.key.charAt(0).toUpperCase() + p.key.slice(1), RASHIS[p.signIndex], chart);
       if (dignity === 'debilitated' || dignity === 'enemy') {
         afflictedPlanets.push({
           name: p.key,
@@ -333,48 +329,6 @@ function analyzeProblem(chart: Chart, conditions: BirthChartConditions, problem:
     remedies: allRemedies.slice(0, 5),  // Top 5 remedies
     transitImpact: `Current transits are affecting your ${lifeArea.name} sector.`,
     currentDashaImpact: `Your current dasa period is influencing ${lifeArea.name}.`,
-  };
-}
-
-// ============================================================
-// DASHA CALCULATION
-// ============================================================
-
-function calculateDasha(chart: Chart): DashaInfo {
-  try {
-    const dashas = vimshottariDasha(chart, 5);
-    if (dashas && dashas.length > 0) {
-      const current = dashas[0];
-      const next = dashas[1] || { planet: 'Jupiter', startAge: 0, endAge: 0 };
-      
-      return {
-        current: current.planet,
-        currentLord: current.planet,
-        antardasha: 'Current antar',  // Would need deeper calculation
-        pratyantardasha: 'Current pratyantar',
-        balance: `${Math.round((current.endAge - current.startAge) * 12)} months remaining`,
-        next: next.planet,
-        nextLord: next.planet,
-        allDashas: dashas.slice(0, 12).map(d => ({
-          planet: d.planet,
-          startAge: d.startAge,
-          endAge: d.endAge,
-        })),
-      };
-    }
-  } catch {
-    // Fallback
-  }
-  
-  return {
-    current: chart.rulingPlanet || 'Jupiter',
-    currentLord: chart.rulingPlanet || 'Jupiter',
-    antardasha: 'Unknown',
-    pratyantardasha: 'Unknown',
-    balance: 'Unknown',
-    next: 'Unknown',
-    nextLord: 'Unknown',
-    allDashas: [],
   };
 }
 
@@ -431,8 +385,8 @@ export function generateInternalReport(
   // Detect yogas
   const yogas = detectYogas(chart);
   
-  // Calculate dasa
-  const dasha = calculateDasha(chart);
+// Calculate dasa using engine
+  const dasha = vimshottariDasha(chart, 5);
   
   // Analyze problem
   const problemAnalysis = analyzeProblem(chart, conditions, problem);
@@ -449,8 +403,8 @@ export function generateInternalReport(
     moon: RASHI_NAMES[chart.moon.signIndex] || 'Aries',
     moonLord: GRAHA_LORDS[chart.moon.signIndex] || 'Moon',
     moonDegree: chart.moon.degreeInSign,
-    sun: RASHI_NAMES[chart.sun.signIndex] || 'Leo',
-    sunLord: GRAHA_LORDS[chart.sun.signIndex] || 'Sun',
+    sun: RASHI_NAMES[chart.sunSign] || 'Leo',
+    sunLord: GRAHA_LORDS[chart.sunSign] || 'Sun',
     sunDegree: chart.sun.degreeInSign,
     nakshatra: chart.moonNakshatra || 'Unknown',
     pada: chart.moonPada || 1,
@@ -585,3 +539,7 @@ function getSymbolsForPlanets(chart: Chart): string[] {
   
   return symbols;
 }
+
+
+
+

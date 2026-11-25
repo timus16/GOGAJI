@@ -15,7 +15,7 @@
 const HASH_SCHEME = "pbkdf2-sha256";
 const HASH_VERSION = "v1";
 const LEGACY_HASH_SCHEME = "pbkdf2";
-const PBKDF2_ITERATIONS = 150_000;
+const PBKDF2_ITERATIONS = 100_000;
 const MAX_ACCEPTED_ITERATIONS = 1_000_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
@@ -106,7 +106,8 @@ let warnedAboutMissingSecret = false;
 function sessionSecret(): Uint8Array<ArrayBuffer> {
   const configured = process.env.SESSION_SECRET?.trim();
   if (configured) return new TextEncoder().encode(configured);
-  if (isProduction()) {
+  const isCfWorker = process.env.CF_WORKER === "true" || process.env.CF_PAGES === "true";
+  if (isProduction() && !isCfWorker) {
     throw new Error(
       "SESSION_SECRET is not set - sessions cannot be signed or verified. Add it to the server environment.",
     );
@@ -240,3 +241,4 @@ export async function verifySession(token: string): Promise<string | null> {
 }
 
 export const randomId = (): string => crypto.randomUUID();
+

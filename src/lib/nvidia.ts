@@ -1,19 +1,19 @@
-/**
+﻿/**
  * The premium wallpaper background: NVIDIA NIM running FLUX.1-dev.
  *
- * This is a real image-model call. The model paints only the ART — the
+ * This is a real image-model call. The model paints only the ART â€” the
  * deterministic renderer overlays the Devanagari mantra and the kundli on
  * top of it, which is why every prompt ends with "no readable text, no
  * watermark".
  */
 
-import { nvidiaKey } from "~/lib/server-key";
+import { nvidiaKey, type EnvLike } from "~/lib/env";
 import { GRAHAS, type StylePreset } from "~/content/vedic-mapping";
 import type { Reading } from "~/lib/gemini";
 import type { BirthInput } from "~/lib/astro";
 
 const NVIDIA_ENDPOINT = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev";
-const NVIDIA_TIMEOUT_MS = 60_000;
+const NVIDIA_TIMEOUT_MS = 110_000;
 const DEFAULT_WIDTH = 832;
 const DEFAULT_HEIGHT = 1216;
 const DEFAULT_SEED = 42;
@@ -24,7 +24,7 @@ const DEFAULT_SEED = 42;
  * Product rule: each submit/regenerate must produce unique artwork even when
  * birth details are identical. FLUX treats seed 0 as "pick a random seed", so
  * we always return a positive integer in 1..2147483646. The optional identity
- * argument is retained for call-site compatibility but is not used — uniqueness
+ * argument is retained for call-site compatibility but is not used â€” uniqueness
  * comes from entropy, not from hashing the chart.
  */
 export function wallpaperSeed(
@@ -99,7 +99,7 @@ function writeImageCache(key: string, value: WallpaperImage): void {
 /**
  * Sniff the real mime type from the magic bytes. The API field is called
  * `base64` but the bytes are frequently JPEG, so the type is never taken on
- * trust — a mislabelled image would fail to render in the browser.
+ * trust â€” a mislabelled image would fail to render in the browser.
  */
 export function sniffImageMime(bytes: Uint8Array): string | null {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
@@ -138,6 +138,8 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
   return { dataUrl: `data:${mime};base64,${b64}`, mime };
 }
 
+
+
 /**
  * Paint one wallpaper background with FLUX.1-dev.
  *
@@ -149,9 +151,9 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
  */
 export async function nvidiaWallpaper(
   prompt: string,
-  opts?: { width?: number; height?: number; seed?: number; keyOverride?: string },
+  opts?: { width?: number; height?: number; seed?: number; keyOverride?: string; env?: EnvLike },
 ): Promise<WallpaperImage> {
-  const key = nvidiaKey(opts?.keyOverride);
+  const key = nvidiaKey(opts?.keyOverride, opts?.env);
   const width = opts?.width ?? DEFAULT_WIDTH;
   const height = opts?.height ?? DEFAULT_HEIGHT;
   const seed = opts?.seed ?? DEFAULT_SEED;
@@ -167,7 +169,7 @@ export async function nvidiaWallpaper(
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ prompt, width, height, seed }),
+    body: JSON.stringify({ prompt, width, height }),
     signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS),
   });
 
@@ -176,7 +178,9 @@ export async function nvidiaWallpaper(
     throw new Error(`NVIDIA request failed (${res.status} ${res.statusText}): ${body}`);
   }
 
-  const payload = (await res.json()) as {
+  // Clone response to read body twice (once for error, once for JSON)
+  const resClone = res.clone();
+  const payload = (await resClone.json()) as {
     artifacts?: { base64?: unknown; url?: unknown }[];
     data?: { b64_json?: unknown; url?: unknown }[];
   };
@@ -242,9 +246,9 @@ function clampWords(text: string, maxWords: number): string {
 /**
  * The pre-built, per-user inputs the prompt builder can use.
  *
- * `facts` is the STRUCTURED fact sheet (`ChartSummary.facts`), so the chart's
+ * `facts` is the STRUCTURED fact sheet (`ChartSummary.facts`), so the chart'"'"'s
  * values are read by key rather than by scraping the prose; `preset` is the
- * user's chosen style archetype, resolved from `presetId` before this is
+ * user'"'"'s chosen style archetype, resolved from `presetId` before this is
  * called. Both are optional, so the builder still works from the flat text
  * alone if it is ever called without them.
  */
@@ -252,14 +256,16 @@ export interface WallpaperPromptInput {
   facts?: Record<string, string>;
   preset?: StylePreset | null;
   focusAreas?: string[];
+  /** Problem area mantra for inscription/theme (Devanagari + Roman) */
+  problemAreaMantra?: { devanagari: string; roman: string; planet: string };
 }
 
 /**
- * Build the art prompt from the reading's brief AND the chart facts.
+ * Build the art prompt from the reading'"'"'s brief AND the chart facts.
  *
  * The brief alone would produce generic devotional art; the chart facts are
- * what make it THIS person's: the nakshatra's classical symbol, its deity, the
- * lagna (ascendant), the ruling planet's classical colours, and the conditions
+ * what make it THIS person'"'"'s: the nakshatra'"'"'s classical symbol, its deity, the
+ * lagna (ascendant), the ruling planet'"'"'s classical colours, and the conditions
  * found in the chart (all pulled from the fact sheet, never hard-coded here).
  *
  * A chosen `preset` folds its own mood, blurb and ground palette into the
@@ -294,14 +300,14 @@ export function promptFromBrief(
   const ruling = grab(/(?:Ruling planet|Ruling Planet|ruling planet):\s*([^.(]+)/, "rulingPlanet");
   const colour = grab(/(?:colours|colors)\s+([#\w ,()/]+?)(?:;|bija|$)/, "rulingColour");
 
-  // The ruling planet's classical colours, straight from the content table.
+  // The ruling planet'"'"'s classical colours, straight from the content table.
   const rulingKey = Object.keys(GRAHAS).find(
     (k) => ruling && GRAHAS[k as keyof typeof GRAHAS].name === ruling.split("(")[0].trim(),
   );
   const graha = rulingKey ? GRAHAS[rulingKey as keyof typeof GRAHAS] : null;
 
   // The prompt is assembled in PRIORITY order: the chart-derived ingredients
-  // come first, the reading's brief and the chosen style next. The word budget
+  // come first, the reading'"'"'s brief and the chosen style next. The word budget
   // is spent front-to-back, so a long brief can never push out the parts that
   // make the art chart-specific and per-user.
   const parts: string[] = [];
@@ -321,7 +327,7 @@ export function promptFromBrief(
       `Palette anchored on the classical colours of the ruling planet ${graha.name}: ${graha.colour.accent} highlight, ${graha.colour.deep} ground, ${graha.colour.glow} glow.`,
     );
   } else if (colour) {
-    parts.push(`Palette anchored on the ruling planet's colours: ${colour}.`);
+    parts.push(`Palette anchored on the ruling planet'"'"'s colours: ${colour}.`);
   }
   if (lagna) {
     parts.push(
@@ -341,6 +347,9 @@ export function promptFromBrief(
   if (palette) parts.push(`Additional colour notes: ${palette}.`);
   if (brief?.inscription?.trim()) {
     parts.push("Leave a clear calm area in the centre for a sacred inscription to be added later.");
+  }
+  if (opts?.problemAreaMantra) {
+    parts.push(`Sacred inscription: "${opts.problemAreaMantra.devanagari}" (${opts.problemAreaMantra.roman}), the bija mantra of ${opts.problemAreaMantra.planet}, for the querent'"'"'s focus.`);
   }
   parts.push(
     preset
@@ -370,3 +379,5 @@ export function promptFromBrief(
 
   return `${body} ${NO_TEXT_CLAUSE}`;
 }
+
+

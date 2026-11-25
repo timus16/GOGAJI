@@ -1,48 +1,43 @@
-import type { ReactNode } from "react";
-import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
-import appCss from "~/styles/app.css?url";
+import {
+  createRootRoute,
+  Outlet,
+  Scripts,
+  HeadContent,
+  Link,
+} from '@tanstack/react-router';
+import { Nav, Footer } from '~/components/Chrome';
 
-export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Nakshatra Canvas — your kundli as wallpaper" },
-      {
-        name: "description",
-        content:
-          "Enter your birth details and get a Vedic wallpaper drawn from your real kundli: moon nakshatra and pada, lagna, ruling planet's yantra, activation mantra. Four styles, phone and desktop downloads.",
-      },
-    ],
-    links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-      { rel: "preload", href: "/fonts/noto-sans-devanagari-400.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
-      { rel: "preload", href: "/fonts/cinzel-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
-    ],
-  }),
-  notFoundComponent: () => <div>Page not found</div>,
-  component: RootComponent,
-});
+const RootRoute = createRootRoute({
+  head: () => (
+    <>
+      <meta charSet="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <meta name="theme-color" content="#04060b" />
+      <HeadContent />
+      <title>Nakshatra Canvas · Your Birth Chart as Living Art</title>
+      <meta name="description" content="Generate your Vedic birth chart wallpaper. Nakshatra, lagna, planetary positions, dashas, and AI-powered readings." />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+    </>
+  ),
+  component: () => (
+    <html lang="en" className="scroll-smooth">
+      <body className="grain vignette min-h-screen bg-void text-bone font-body antialiased">
+        <div className="letterbox letterbox-top" aria-hidden="true" />
+        <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
-function RootComponent() {
-  return (
-    <RootDocument>
-      <Outlet />
-    </RootDocument>
-  );
-}
+        <Nav />
 
-function RootDocument({ children }: { children: ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {children}
+        <main id="main-content" className="relative z-10 pt-16 pb-24 md:pt-20 md:pb-32">
+          <Outlet />
+        </main>
+
+        <Footer />
+
         <Scripts />
       </body>
     </html>
-  );
-}
+  ),
+});
+
+export const Route = RootRoute;

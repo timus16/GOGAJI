@@ -260,7 +260,7 @@ export default function Generator({ initialName = "", subject = "self", autoGene
   // Composed birth strings + inline validation. The day is re-clamped when the
   // month/year changes, but a typed day that overflows the month (Feb 30) or a
   // year outside 1900..currentYear surfaces as an inline error and blocks submit.
-  const currentYear = new Date().getFullYear();
+  const currentYear = 2026;
   const yearNum = Number(yearText);
   const dayNum = Number(dayText);
   const daysInMonth = dim(yearNum, month);
@@ -809,17 +809,17 @@ export default function Generator({ initialName = "", subject = "self", autoGene
                   <div className="rounded bg-amber-500/10 p-3">
                     <h4 className="mb-1 font-medium text-amber-200">{internalReport.problemAnalysis.area} Analysis</h4>
                     <p className="text-[11px] text-neutral-400">{internalReport.problemAnalysis.transitImpact}</p>
-                    {internalReport.problemAnalysis.afflictedPlanets.length > 0 && (
+                    {internalReport.problemAnalysis.afflictedPlanets?.length > 0 && (
                       <div className="mt-2">
                         <span className="text-[10px] text-neutral-500">Affected planets: </span>
-                        <span className="text-neutral-300">{internalReport.problemAnalysis.afflictedPlanets.map(p => p.name).join(", ")}</span>
+                        <span className="text-neutral-300">{internalReport.problemAnalysis.afflictedPlanets.map(p => String(p?.name ?? "")).join(", ")}</span>
                       </div>
                     )}
-                    {internalReport.problemAnalysis.remedies.length > 0 && (
+                    {internalReport.problemAnalysis.remedies?.length > 0 && (
                       <div className="mt-2 border-t border-white/10 pt-2">
                         <span className="text-[10px] font-medium text-neutral-400">Remedies: </span>
                         {internalReport.problemAnalysis.remedies.slice(0, 2).map((r, i) => (
-                          <p key={i} className="text-[10px] text-neutral-400">{r.type}: {r.name}</p>
+                          <p key={i} className="text-[10px] text-neutral-400">{String(r?.type ?? "")}: {String(r?.name ?? "")}</p>
                         ))}
                       </div>
                     )}

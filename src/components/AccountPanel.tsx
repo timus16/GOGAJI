@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getSession, logoutAuth, setPremium } from "~/server/api-auth";
-import type { SessionResponse, SetPremiumResponse } from "~/server/api-auth";
+import { getSession, logoutAuth, setPremium } from "~/server/api-auth.server";
+import type { SessionResponse, SetPremiumResponse } from "~/server/api-auth.server";
 
 export interface AccountPanelProps {
   deviceId: string;

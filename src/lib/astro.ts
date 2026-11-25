@@ -269,7 +269,7 @@ function placement(key: PlanetKey, lon: number): Placement {
   };
 }
 
-export function computeChart(input: BirthInput): Chart {
+export function computeChartSync(input: BirthInput): Chart {
   const { utc, offsetMinutes } = localToUtc(input.date, input.time, input.timezone);
   const jd = jdFromDate(utc);
   const T = (jd - 2451545.0) / 36525;
@@ -357,6 +357,8 @@ export function computeChart(input: BirthInput): Chart {
     ],
   };
 }
+export const computeChart = computeChartSync;
+
 
 export const dms = (deg: number) => {
   const total = Math.round(deg * 3600);
@@ -498,4 +500,221 @@ export function vimshottariDasha(chart: Chart, count = 9) {
     periods,
     provisionalNotes: ["dates use mean solar years, not precise daśā-panchaka (PROVISIONAL)"],
   };
+}
+
+/* ---------------------------------------------------------------- dasha systems */
+
+export interface DashaPeriod {
+  planet: string;
+  planetSanskrit: string;
+  startDate: string;
+  endDate: string;
+  durationYears: number;
+  durationDays: number;
+  level: number;
+  parent?: string;
+}
+
+export interface DashaResult {
+  system: 'vimshottari' | 'sputa' | 'yogini' | 'kalachakra' | 'char' | 'ashtottari';
+  currentMahadasha: DashaPeriod;
+  currentAntardasha: DashaPeriod;
+  currentPratyantardasha?: DashaPeriod;
+  mahadashaSequence: DashaPeriod[];
+  upcomingTransitions: Array<{ date: string; period: DashaPeriod }>;
+}
+
+const VIMSHOTTARI_SEQUENCE = [
+  { planet: 'Ketu', sanskrit: 'केतु', years: 7 },
+  { planet: 'Venus', sanskrit: 'शुक्र', years: 20 },
+  { planet: 'Sun', sanskrit: 'सूर्य', years: 6 },
+  { planet: 'Moon', sanskrit: 'चन्द्र', years: 10 },
+  { planet: 'Mars', sanskrit: 'मंगल', years: 7 },
+  { planet: 'Rahu', sanskrit: 'राहु', years: 18 },
+  { planet: 'Jupiter', sanskrit: 'गुरु', years: 16 },
+  { planet: 'Saturn', sanskrit: 'शनि', years: 19 },
+  { planet: 'Mercury', sanskrit: 'बुध', years: 17 },
+]
+
+const SPUTA_SEQUENCE = [
+  { planet: 'Sun', sanskrit: 'सूर्य', years: 6 },
+  { planet: 'Moon', sanskrit: 'चन्द्र', years: 10 },
+  { planet: 'Mars', sanskrit: 'मंगल', years: 7 },
+  { planet: 'Rahu', sanskrit: 'राहु', years: 18 },
+  { planet: 'Jupiter', sanskrit: 'गुरु', years: 16 },
+  { planet: 'Saturn', sanskrit: 'शनि', years: 19 },
+  { planet: 'Mercury', sanskrit: 'बुध', years: 17 },
+  { planet: 'Ketu', sanskrit: 'केतु', years: 7 },
+  { planet: 'Venus', sanskrit: 'शुक्र', years: 20 },
+]
+
+const YOGINI_SEQUENCE = [
+  { planet: 'Moon', sanskrit: 'चन्द्र', years: 1, name: 'Mangala' },
+  { planet: 'Sun', sanskrit: 'सूर्य', years: 2, name: 'Pingala' },
+  { planet: 'Jupiter', sanskrit: 'गुरु', years: 3, name: 'Dhanya' },
+  { planet: 'Mars', sanskrit: 'मंगल', years: 4, name: 'Bhramari' },
+  { planet: 'Mercury', sanskrit: 'बुध', years: 5, name: 'Bhadrika' },
+  { planet: 'Saturn', sanskrit: 'शनि', years: 6, name: 'Ulka' },
+  { planet: 'Venus', sanskrit: 'शुक्र', years: 7, name: 'Siddha' },
+  { planet: 'Rahu', sanskrit: 'राहु', years: 8, name: 'Sankata' },
+]
+
+const SIGN_NAMES = [
+  'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
+  'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'
+]
+
+const SIGN_SANSKRIT = [
+  'मेष', 'वृषभ', 'मिथुन', 'कर्क', 'सिंह', 'कन्या',
+  'तुला', 'वृश्चिक', 'धनु', 'मकर', 'कुम्भ', 'मीन'
+]
+
+const NAKSHATRAS_DASHA = [
+  'Ashwini', 'Bharani', 'Kritika', 'Rohini', 'Mrigashira', 'Ardra',
+  'Punarvasu', 'Pushya', 'Ashlesha', 'Magha', 'Purva Phalguni', 'Uttara Phalguni',
+  'Hasta', 'Chitra', 'Swati', 'Vishakha', 'Anuradha', 'Jyeshtha',
+  'Mula', 'Purva Ashadha', 'Uttara Ashadha', 'Shravana', 'Dhanishtha', 'Shatabhisha',
+  'Purva Bhadrapada', 'Uttara Bhadrapada', 'Revati'
+]
+
+const NAKSHATRA_LORDS = [
+  'Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu',
+  'Jupiter', 'Saturn', 'Mercury',
+  'Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu',
+  'Jupiter', 'Saturn', 'Mercury',
+  'Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu',
+  'Jupiter', 'Saturn', 'Mercury'
+]
+
+function buildMahadashaSequence(chart, sequence, startIndex) {
+  const birthDate = new Date(chart.input.date + 'T' + chart.input.time)
+  const ordered = [...sequence.slice(startIndex), ...sequence.slice(0, startIndex)]
+  let currentDate = new Date(birthDate)
+  const result = []
+  for (const period of ordered) {
+    const endDate = new Date(currentDate)
+    endDate.setFullYear(endDate.getFullYear() + period.years)
+    result.push({
+      planet: period.planet,
+      planetSanskrit: period.sanskrit,
+      startDate: currentDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      durationYears: period.years,
+      durationDays: period.years * 365.25,
+      level: 0,
+    })
+    currentDate = endDate
+  }
+  return result
+}
+
+function findCurrentPeriod(periods) {
+  const now = new Date()
+  const found = periods.find((p, i) => new Date(p.startDate) <= now && new Date(p.endDate) > now)
+  if (found) return { period: found, index: periods.indexOf(found) }
+  return { period: periods[0], index: 0 }
+}
+
+function calculateAntardashaSequence(mahadashaPlanet, sequence) {
+  const startIndex = sequence.findIndex(p => p.planet === mahadashaPlanet)
+  if (startIndex === -1) return sequence
+  return [...sequence.slice(startIndex), ...sequence.slice(0, startIndex)]
+}
+
+function buildAntardashaPeriods(mahadasha, antardashaSeq) {
+  let currentDate = new Date(mahadasha.startDate)
+  const result = []
+  for (const period of antardashaSeq) {
+    const endDate = new Date(currentDate)
+    endDate.setFullYear(endDate.getFullYear() + period.years)
+    result.push({
+      planet: period.planet,
+      planetSanskrit: period.sanskrit,
+      startDate: currentDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0],
+      durationYears: period.years,
+      durationDays: period.years * 365.25,
+      level: 1,
+      parent: mahadasha.planet,
+    })
+    currentDate = endDate
+  }
+  return result
+}
+
+export function calculateVimshottariDasha(chart) {
+  const moonNakIndex = NAKSHATRAS_DASHA.indexOf(chart.moonNakshatra.name)
+  const startIndex = moonNakIndex % 9
+  const mahadashaSequence = buildMahadashaSequence(chart, VIMSHOTTARI_SEQUENCE, startIndex)
+  const { period: currentMahadasha, index: currentIndex } = findCurrentPeriod(mahadashaSequence)
+  const antardashaSeq = calculateAntardashaSequence(currentMahadasha.planet, VIMSHOTTARI_SEQUENCE)
+  const antardashaPeriods = buildAntardashaPeriods(currentMahadasha, antardashaSeq)
+  const currentAntardasha = findCurrentPeriod(antardashaPeriods).period
+  return {
+    system: 'vimshottari',
+    currentMahadasha,
+    currentAntardasha,
+    mahadashaSequence,
+    upcomingTransitions: mahadashaSequence.slice(currentIndex + 1, currentIndex + 4).map(p => ({
+      date: p.startDate,
+      period: p,
+    })),
+  }
+}
+
+export function calculateSputaDasha(chart) {
+  const moonNakIndex = NAKSHATRAS_DASHA.indexOf(chart.moonNakshatra.name)
+  const startIndex = moonNakIndex % 9
+  const mahadashaSequence = buildMahadashaSequence(chart, SPUTA_SEQUENCE, startIndex)
+  const { period: currentMahadasha, index: currentIndex } = findCurrentPeriod(mahadashaSequence)
+  const antardashaSeq = calculateAntardashaSequence(currentMahadasha.planet, SPUTA_SEQUENCE)
+  const antardashaPeriods = buildAntardashaPeriods(currentMahadasha, antardashaSeq)
+  const currentAntardasha = findCurrentPeriod(antardashaPeriods).period
+  return {
+    system: 'sputa',
+    currentMahadasha,
+    currentAntardasha,
+    mahadashaSequence,
+    upcomingTransitions: mahadashaSequence.slice(currentIndex + 1, currentIndex + 4).map(p => ({
+      date: p.startDate,
+      period: p,
+    })),
+  }
+}
+
+export function calculateYoginiDasha(chart) {
+  const moonNakIndex = NAKSHATRAS_DASHA.indexOf(chart.moonNakshatra.name)
+  const startIndex = moonNakIndex % 8
+  const mahadashaSequence = buildMahadashaSequence(chart, YOGINI_SEQUENCE, startIndex)
+  const { period: currentMahadasha, index: currentIndex } = findCurrentPeriod(mahadashaSequence)
+  const antardashaSeq = calculateAntardashaSequence(
+    currentMahadasha.planet,
+    YOGINI_SEQUENCE.map(p => ({ planet: p.planet, sanskrit: p.sanskrit, years: p.years }))
+  )
+  const antardashaPeriods = buildAntardashaPeriods(currentMahadasha, antardashaSeq)
+  const currentAntardasha = findCurrentPeriod(antardashaPeriods).period
+  return {
+    system: 'yogini',
+    currentMahadasha,
+    currentAntardasha,
+    mahadashaSequence,
+    upcomingTransitions: mahadashaSequence.slice(currentIndex + 1, currentIndex + 4).map(p => ({
+      date: p.startDate,
+      period: p,
+    })),
+  }
+}
+
+export type DashaSystem = 'vimshottari' | 'sputa' | 'yogini' | 'kalachakra' | 'char' | 'ashtottari'
+
+export function calculateDasha(chart, dashaSystem) {
+  switch (dashaSystem) {
+    case 'sputa':
+      return calculateSputaDasha(chart)
+    case 'yogini':
+      return calculateYoginiDasha(chart)
+    case 'vimshottari':
+    default:
+      return calculateVimshottariDasha(chart)
+  }
 }

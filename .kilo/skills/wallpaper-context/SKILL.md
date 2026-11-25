@@ -1,6 +1,6 @@
 ﻿---
 name: wallpaper-context
-description: Generates wallpaper visual context from chart analysis - energy, chakra, color, symbols, mood. No text generation. Triggers when chart data and problem focus are available. max_tokens: 400.
+description: "Generates wallpaper visual context from chart analysis - energy, chakra, color, symbols, mood. No text generation. Triggers when chart data and problem focus are available. max_tokens: 400."
 version: 1.0
 ---
 
@@ -83,7 +83,7 @@ Return ONLY this JSON structure (never deviate):
 | Rahu | Material desire, obsession | Smoke |
 | Ketu | Spirituality, detachment | Smoke Grey |
 
-## Symbol Library
+## Planet Symbol Library
 
 | Planet | Symbols |
 |--------|---------|
@@ -97,10 +97,43 @@ Return ONLY this JSON structure (never deviate):
 | Rahu | serpent, smoke, phantom |
 | Ketu | tiger, horse, weapon |
 
+## Nakshatra-Specific Motif Symbols (from vedic-mapping.ts MotifKey)
+
+| Nakshatra | Motif | Visual Symbols |
+|---|---|---|
+| Ashwini | horse | horse head, stallion, horses |
+| Bharani | yoni | yoni, womb, creative portal |
+| Krittika | flame | razor, flame, knife, fire |
+| Rohini | chariot | ox-cart, chariot, wagon |
+| Mrigashira | deer | deer, antelope, stag |
+| Ardra | drop | teardrop, water drop, raindrop |
+| Punarvasu | bow | bow, quiver, arrows |
+| Pushya | lotus | cow udder, lotus, nourishment |
+| Ashlesha | serpent | coiled serpent, naga, kundalini |
+| Magha | throne | royal throne, palanquin, seat |
+| Purva Phalguni | cot | bed, couch, front legs |
+| Uttara Phalguni | cot | bed, back legs, resting place |
+| Hasta | hand | open hand, palm, skill |
+| Chitra | jewel | bright jewel, pearl, gemstone |
+| Swati | sprout | young sprout, coral, sapling |
+| Vishakha | arch | triumphal arch, gateway, portal |
+| Anuradha | lotus | lotus flower, devotion |
+| Jyeshtha | jewel | earring, umbrella, protection |
+| Mula | roots | tied roots, bunch, foundation |
+| Purva Ashadha | fan | winnowing fan, purification |
+| Uttara Ashadha | tusk | elephant tusk, strength |
+| Shravana | ear | three footprints, ear, listening |
+| Dhanishtha | drum | drum, flute, rhythm |
+| Shatabhisha | circle | empty circle, 1000-petaled lotus |
+| Purva Bhadrapada | sword | sword, two-faced, discernment |
+| Uttara Bhadrapada | twins | twins, serpent pair, duality |
+| Revati | fish | fish, drum, completion |
+
 ## Source of Truth
 
 - ALL chakra/color/symbol mappings come from `src/content/vedic-mapping.ts`
 - Symbols from `src/content/vedic-mapping.ts` GRAHAS[].yantra
+- Nakshatra motifs from `src/content/vedic-mapping.ts` NAKSHATRAS[].motif
 - NEVER invent new symbols or colors
 
 ## Memory Rules

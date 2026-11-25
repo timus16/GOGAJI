@@ -137,3 +137,46 @@ Error: EBUSY: resource busy or locked, open 'E:\sentir\gogaji\GOGAJI\src\routes\
 [2m3:16:08 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css?direct[22m
 [2m3:16:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css?direct, /src/components/Generator.tsx[22m
 [2m3:16:19 PM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mpage reload [39m[2msrc/server/ai.ts[22m
+[2m4:00:35 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css?direct, /src/components/Generator.tsx[22m
+[2m4:00:35 PM[22m [36m[1m[vite][22m[39m [34m[2m(ssr)[22m[39m [32mpage reload [39m[2msrc/components/Generator.tsx[22m
+[2m4:09:19 PM[22m [36m[1m[vite][22m[39m changed tsconfig file detected: E:/sentir/gogaji/GOGAJI/.kilo/worktrees/button-jujube/tsconfig.json - Clearing cache and forcing full-reload to ensure TypeScript is compiled with updated config values.
+[vite] program reload
+[2m4:12:04 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles/app.css?direct[22m
+[2m4:16:17 PM[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m4:16:18 PM[22m [36m[1m[vite][22m[39m server restarted.
+[2m4:58:43 PM[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m4:58:44 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+[2m4:58:44 PM[22m [36m[1m[vite][22m[39m server restarted.
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:06:19 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:10:06 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:12:30 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:17:25 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:17:25 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:17:25 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:17:25 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:17:26 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m5:17:26 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/index.html[22m
+[2m5:17:26 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/snapshot.html[22m
+[2m5:17:26 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/trace/uiMode.html[22m
+[2m5:17:26 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m

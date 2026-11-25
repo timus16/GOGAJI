@@ -1,6 +1,6 @@
----
+﻿---
 name: astrology-premium-service
-description: 'Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (active chain: Gemini -> OpenRouter; Baidu exists but is NOT in the active chain), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".'
+description: '"'"'Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (active chain: Gemini -> OpenRouter; Baidu exists but is NOT in the active chain), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".'"'"'
 ---
 
 # Astrology Premium Service (GOGAJI)
@@ -27,6 +27,16 @@ contract for that pipeline.
 | `scripts/horizons-compare.ts` | Engine vs NASA/JPL Horizons comparison |
 | `src/content/regional.ts` | Regional layer: `INDIAN_STATES` - 36 entries (28 states + 8 UTs), amānta/pūrṇimānta per state, real new-years, regional rashi+nakshatra names, `traditionByState` alias matching |
 
+## 0a. Skill Pipeline Integration
+
+| Skill | Role in Pipeline |
+|---|---|
+| `astrology-premium-service` | Master orchestration - governs the two-AI pipeline, chart engine, content rules, and degradation |
+| `problem-analyzer` | Maps user problem to focus houses + planets (triggers on problem category) |
+| `wallpaper-context` | Generates visual context (energy, chakra, color, symbols, mood) from chart + problem |
+| `image-prompt` | Generates NVIDIA flux.1-dev prompt from context + chart facts + style preset |
+| `regional-panchanga` | Pañchāṅga engine: tithi, yoga, karaṇa, lunar month (amānta/pūrṇimānta), Vimśottarī daśā, regional new-years |
+
 **Regional layer.** State/UT traditions (reckoning, new-years, native names) live in `src/content/regional.ts`; the operating contract for them is `.kilo/skills/regional-panchanga/SKILL.md`.
 
 ## 1. DIVISION OF LABOUR (the rule that makes it trustworthy)
@@ -43,10 +53,10 @@ contract for that pipeline.
 ### Engine provenance (`src/lib/astro.ts` header - keep it true)
 
 - Sun: Meeus, *Astronomical Algorithms* ch. 25 (low-precision, ~0.01 deg apparent geocentric tropical longitude of date)
-- Moon: Meeus ch. 47, series truncated at `|term| >= 0.004 deg` (~23 terms, residual under 0.02 deg vs the Moon's 0.55 deg/hour)
+- Moon: Meeus ch. 47, series truncated at `|term| >= 0.004 deg` (~23 terms, residual under 0.02 deg vs the Moon'"'"'s 0.55 deg/hour)
 - Mercury-Saturn: JPL "Approximate Positions of the Planets" Keplerian elements (valid 1800-2050), heliocentric -> geocentric ecliptic longitude
 - Rāhu/Ketu: mean lunar node (Meeus ch. 47); Rāhu = Ω, Ketu = Ω + 180 deg
-- Ayanāṃśa: Lāhiri (Citrāpakṣa), anchored at 23°51'11" (= 23.85306 deg) at J2000, advanced by general precession in longitude `p = 5029.0966"·T + 1.11113"·T²`
+- Ayanāṃśa: Lāhiri (Citrāpakṣa), anchored at 23°51'"'"'11" (= 23.85306 deg) at J2000, advanced by general precession in longitude `p = 5029.0966"·T + 1.11113"·T²`
 - Ascendant: tropical ascendant from mean obliquity + apparent sidereal time (Meeus ch. 12), converted to the sidereal zodiac
 - Houses: **whole-sign** (rāśi = bhāva); lagna sign = house 1
 - Retrogression: sidereal longitude compared with the value one day earlier
@@ -70,31 +80,31 @@ a nakshatra, a pada, a house placement, or a retrogression flag. If a fact is no
 ```
 WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[];
   keys?: { gemini?; openrouter?; nvidia? } }   // BYOK, per-request, from localStorage `gogaji.keys`
-  -> shouldCallAI(input, intent)   src/lib/qualification.ts   GATE: BEFORE any provider call;
-       blocked => one calm amber line; the deterministic wallpaper still renders
-  -> captureSubmit(data, consent)  src/lib/crm.ts   persists ONLY when consent (AI opt-in);
-       otherwise transient
+   -> shouldCallAI(input, intent)   src/lib/qualification.ts   GATE: BEFORE any provider call;
+        blocked => one calm amber line; the deterministic wallpaper still renders
+   -> captureSubmit(data, consent)  src/lib/crm.ts   persists ONLY when consent (AI opt-in);
+        otherwise transient
 birth input (name, date, time, place, lat, lon, IANA timezone)
-  -> localToUtc -> jdFromDate
-  -> computeChart()            src/lib/astro.ts
-       sidereal longitudes, nakshatra + pada, lagna, whole-sign houses,
-       retrogression, ruling planet (nakshatra lord), pada syllable, notes
-  -> assessChart(chart)        src/content/problems.ts
-       conditions[] + positives[] (deterministic heuristics over the Chart)
-  -> chartFactSheet(chart, conditions, focusAreas)   src/content/problems.ts
-       facts{} + flat text (chart facts + conditions + positives; focus areas move the relevant conditions to the front and add a "Querent focus:" line)
-  -> readKundli(factSheetText) src/lib/gemini.ts
-       cache hit, else the ACTIVE chain Gemini -> OpenRouter (Baidu exists but is not in the chain)
-       -> { reading, provider }; empty/unusable answers fall through
-       condition, primary: LifeArea[], reading, remedies[], affirmation,
-       wallpaperBrief { mood, palette, motifs, inscription }
-  -> buildReadingPrompt(factSheetText, focusAreas?)  src/lib/gemini.ts
-        (adds the QUERENT'S STATED FOCUS line)
-  -> promptFromBrief(reading, chartFacts, { focusAreas })   src/lib/nvidia.ts
-        (one thematic-mood sentence; the no-readable-text clause stays)
-  -> nvidiaWallpaper(prompt, { width: 832, height: 1216 })  src/lib/nvidia.ts
-       -> { dataUrl, mime, width, height }
-  -> composite / present: deterministic SVG (src/lib/wallpaper.ts) + AI art + reading UI
+   -> localToUtc -> jdFromDate
+   -> computeChart()            src/lib/astro.ts
+        sidereal longitudes, nakshatra + pada, lagna, whole-sign houses,
+        retrogression, ruling planet (nakshatra lord), pada syllable, notes
+   -> assessChart(chart)        src/content/problems.ts
+        conditions[] + positives[] (deterministic heuristics over the Chart)
+   -> chartFactSheet(chart, conditions, focusAreas)   src/content/problems.ts
+        facts{} + flat text (chart facts + conditions + positives; focus areas move the relevant conditions to the front and add a "Querent focus:" line)
+   -> readKundli(factSheetText) src/lib/gemini.ts
+        cache hit, else the ACTIVE chain Gemini -> OpenRouter (Baidu exists but is not in the chain)
+        -> { reading, provider }; empty/unusable answers fall through
+        condition, primary: LifeArea[], reading, remedies[], affirmation,
+        wallpaperBrief { mood, palette, motifs, inscription }
+   -> buildReadingPrompt(factSheetText, focusAreas?)  src/lib/gemini.ts
+         (adds the QUERENT'"'"'S STATED FOCUS line)
+   -> promptFromBrief(reading, chartFacts, { focusAreas })   src/lib/nvidia.ts
+         (one thematic-mood sentence; the no-readable-text clause stays)
+   -> nvidiaWallpaper(prompt, { width: 832, height: 1216 })  src/lib/nvidia.ts
+        -> { dataUrl, mime, width, height }
+   -> composite / present: deterministic SVG (src/lib/wallpaper.ts) + AI art + reading UI
 ```
 
 `src/server/ai.ts` exposes `generateWallpaper` as a `createServerFn({ method: "POST" })`
@@ -180,7 +190,7 @@ functional benefic/malefic weighting are **not** modelled. The rules mirror the 
 ### Never invent
 
 - **No invented nakshatra colour.** There is no single authoritative nakshatra-colour
-  set; sources disagree. Derive the palette from the **ruling planet's classical
+  set; sources disagree. Derive the palette from the **ruling planet'"'"'s classical
   graha-varṇa** (Sun copper/red, Moon white, Mars red, Mercury green, Jupiter yellow,
   Venus white/variegated, Saturn black-deep blue, Rāhu smoke, Ketu smoke-grey).
 - **No unverified attribution.** Do not claim a mantra, deity, or remedy "per BPHS" unless
@@ -196,7 +206,7 @@ functional benefic/malefic weighting are **not** modelled. The rules mirror the 
 `Chart.notes` carries the standing caveats (Lāhiri ayanāṃśa, mean node for Rāhu/Ketu,
 whole-sign houses). Keep them accurate if the engine changes. A pada is 200 arcmin wide
 and a rāśi 1800 arcmin, so a sub-arcminute engine error can still change a pada for a
-birth time given to the minute - see the validator's printed sensitivity note.
+birth time given to the minute - see the validator'"'"'s printed sensitivity note.
 
 ## 5. VEDIC CONTENT AUTHORING RULES
 
@@ -216,7 +226,7 @@ birth time given to the minute - see the validator's printed sensitivity note.
   `petals`, `bhupura`, `cornerMotifs`, `starField`, `lineWeight`, `displayFont`,
   `letterSpacing`, `uppercase`, `dark`.
 - Devanagari must render as glyphs, never tofu: the wallpapers declare
-  `'Noto Sans Devanagari'` in the `@font-face` rules and the reading UI points at that
+  `'"'"'Noto Sans Devanagari'"'"'` in the `@font-face` rules and the reading UI points at that
   family explicitly. Do not replace it with a generic `serif` fallback.
 
 ## 6. OPERATIONAL CHECKLIST
@@ -276,11 +286,11 @@ Never mislabel; never guess.
 ### Deploy targets
 
 - **Primary: Bun.** `serve.ts` serves the built app via `bun run start` (`bun run build`
-  first; `bun run publish` wraps it). It pins Bun's `idleTimeout` to 255 s - the request
+  first; `bun run publish` wraps it). It pins Bun'"'"'s `idleTimeout` to 255 s - the request
   budget in `src/server/ai.ts` is sized to stay under that.
 - **Cloudflare Workers (optional).** `bun run build:cloudflare` bundles the Worker + SSR
   handler to `dist/cloudflare-worker/index.js`, then `npx wrangler deploy`. Requires the
-  Workers **Paid** plan: `limits.cpu_ms` cannot be raised above the Free plan's 10 ms, and
+  Workers **Paid** plan: `limits.cpu_ms` cannot be raised above the Free plan'"'"'s 10 ms, and
   SSR plus an AI call exceeds it. See `docs/CLOUDFLARE-DEPLOY.md`.
 - **Secrets** come from the host secret store (Worker secrets via
   `npx wrangler secret put <NAME>`), never from `.env` and never from `wrangler.jsonc`
@@ -294,7 +304,7 @@ Never mislabel; never guess.
 # AND that every planetary yantra is a genuine magic square.
 bun run scripts/validate-chart.ts
 
-# Compare the engine's tropical longitudes against NASA/JPL Horizons
+# Compare the engine'"'"'s tropical longitudes against NASA/JPL Horizons
 # (public, independent ephemeris). Prints the worst disagreement in arcmin.
 bun run scripts/horizons-compare.ts
 ```
@@ -305,7 +315,7 @@ columns, and both diagonals sum to the magic constant, with 1..n² distinct). If
 `horizons-compare.ts` needs network access to `ssd.jpl.nasa.gov`.
 
 If `bun` is unavailable on the machine, `npx -y --package bun bun run scripts/<name>.ts`
-runs the same scripts; plain `node --experimental-strip-types` fails on the repo's
+runs the same scripts; plain `node --experimental-strip-types` fails on the repo'"'"'s
 extensionless imports.
 
 ## 7. COST DISCIPLINE
@@ -329,3 +339,5 @@ extensionless imports.
 - The paid path is rate-limited per IP (`AI_RATE_LIMIT_PER_MIN`, default 5/min, in-memory
   and per-instance). Long AI work must be a `POST` server function (never a GET the gateway
   can re-send), and should stream or poll if it regularly runs past ~20 s.
+
+(End of file)

@@ -1,6 +1,11 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
-  "snapshot": false,
+  "snapshot": true,
+  "indexing": {
+    "enabled": true,
+    "provider": "kilo",
+    "model": "mistralai/mistral-embed-2312"
+  },
   "agents": {
     "workflow-orchestrator": {
       "description": "Primary agent for deterministic wallpaper pipeline",

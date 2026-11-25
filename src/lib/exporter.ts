@@ -8,8 +8,8 @@ export const PHONE = { width: 1170, height: 2532 };
 export const DESKTOP = { width: 2560, height: 1440 };
 
 const FONT_FILES = {
-  dev: "/fonts/noto-sans-devanagari-400.woff2",
-  display: "/fonts/cinzel-latin.woff2",
+  dev: "/fonts/noto-sans-devanagari-vf.woff2",
+  display: "/fonts/cinzel-vf.woff2",
 } as const;
 
 function toBase64(bytes: Uint8Array): string {
@@ -40,15 +40,15 @@ export async function fontDataUris(): Promise<{ dev: string; display: string }> 
 
 /** @font-face rules pointing at the site's own font files (for the live preview). */
 export const previewFontFaceCss = `
-  @font-face{font-family:'Noto Sans Devanagari';src:url('${FONT_FILES.dev}') format('woff2');font-weight:400 700;font-display:block}
-  @font-face{font-family:'Cinzel';src:url('${FONT_FILES.display}') format('woff2');font-weight:400 700;font-display:block}
+  @font-face{font-family:'Noto Sans Devanagari';src:url('${FONT_FILES.dev}') format('woff2');font-weight:400 700;font-optical-sizing:auto;font-display:swap}
+  @font-face{font-family:'Cinzel';src:url('${FONT_FILES.display}') format('woff2');font-weight:400 700;font-optical-sizing:auto;font-display:swap}
 `;
 
 /** @font-face rules with the glyphs inline (for the exported PNG). */
 export function embeddedFontFaceCss(u: { dev: string; display: string }): string {
   return `
-  @font-face{font-family:'Noto Sans Devanagari';src:url('${u.dev}') format('woff2');font-weight:400 700}
-  @font-face{font-family:'Cinzel';src:url('${u.display}') format('woff2');font-weight:400 700}
+  @font-face{font-family:'Noto Sans Devanagari';src:url('${u.dev}') format('woff2');font-weight:400 700;font-optical-sizing:auto;font-display:swap}
+  @font-face{font-family:'Cinzel';src:url('${u.display}') format('woff2');font-weight:400 700;font-optical-sizing:auto;font-display:swap}
   `;
 }
 
