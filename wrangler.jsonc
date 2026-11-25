@@ -1,11 +1,8 @@
-﻿{
+{
   "name": "nakshatra-canvas",
   "main": "./dist/cloudflare-worker/worker.js",
   "compatibility_date": "2026-08-04",
-  "compatibility_flags": ["streams_enable_constructors", 
-    "nodejs_compat"
-  ],
-  
+  "compatibility_flags": ["streams_enable_constructors", "nodejs_compat"],
   "upload_source_maps": true,
   "assets": {
     "directory": "./dist/client",
@@ -14,39 +11,9 @@
     "run_worker_first": true
   },
   "vars": {
-    "PUBLIC_SITE_URL": "https://nakshatra-canvas.workers.dev"
+    "PUBLIC_SITE_URL": "https://nakshatra-canvas.pages.dev"
   },
   "observability": {
     "enabled": true
-  },
-  "alias": {
-    "@neondatabase/serverless": "./empty-shim.js",
-    "cloudflare:workers": "./cloudflare-workers-shim.js"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "nakshatra-canvas-db",
-      "database_id": "26e43af8-8246-4d20-92f6-ab4a552392f9"
-    }
-  ],
-  "queues": {
-    "producers": [
-      { "queue": "wallpaper-generation", "binding": "WALLPAPER_QUEUE" }
-    ],
-    "consumers": [
-      { "queue": "wallpaper-generation", "max_batch_size": 1, "max_batch_timeout": 30 }
-    ]
-  },
-  "durable_objects": {
-    "bindings": [
-      { "name": "JOBS_DO", "class_name": "JobsDurableObject" }
-    ]
-  },
-  "exports": {
-    "JobsDurableObject": {
-      "type": "durable-object",
-      "storage": "sqlite"
-    }
   }
 }
