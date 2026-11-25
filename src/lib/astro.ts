@@ -26,7 +26,7 @@ import {
 
 const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
-const norm360 = (x: number) => ((x % 360) + 360) % 360;
+export const norm360 = (x: number) => ((x % 360) + 360) % 360;
 
 export interface BirthInput {
   name: string;
@@ -358,6 +358,69 @@ export function computeChartSync(input: BirthInput): Chart {
   };
 }
 export const computeChart = computeChartSync;
+
+export interface TransitPosition {
+  key: PlanetKey;
+  longitude: number;
+  signIndex: number;
+  degreeInSign: number;
+  nakshatraIndex: number;
+  pada: number;
+  retrograde: boolean;
+}
+
+export function computeTransits(utc: Date): TransitPosition[] {
+  const jd = jdFromDate(utc);
+  const ayan = lahiriAyanamsa(jd);
+  const T = (jd - 2451545.0) / 36525;
+
+  const tropical: Record<PlanetKey, number> = {
+    sun: sunLongitude(jd),
+    moon: moonLongitude(jd),
+    mercury: planetLongitude("mercury", T),
+    venus: planetLongitude("venus", T),
+    mars: planetLongitude("mars", T),
+    jupiter: planetLongitude("jupiter", T),
+    saturn: planetLongitude("saturn", T),
+    rahu: meanNode(jd),
+    ketu: norm360(meanNode(jd) + 180),
+  };
+
+  const order: PlanetKey[] = ["sun", "moon", "mars", "mercury", "jupiter", "venus", "saturn", "rahu", "ketu"];
+  const results: TransitPosition[] = [];
+
+  for (const key of order) {
+    const sidereal = norm360(tropical[key] - ayan);
+    const signIndex = Math.floor(sidereal / 30);
+    const degreeInSign = sidereal % 30;
+    const nakshatraIndex = Math.floor(sidereal / NAK_SPAN);
+    const pada = Math.floor((sidereal % NAK_SPAN) / PADA_SPAN) + 1;
+
+    let retrograde = false;
+    if (["mercury", "venus", "mars", "jupiter", "saturn"].includes(key)) {
+      const prevT = T - 1 / 36525;
+      const prevTrop = planetLongitude(key, prevT);
+      const prevSid = norm360(prevTrop - lahiriAyanamsa(jd - 1));
+      let diff = sidereal - prevSid;
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      retrograde = diff < 0;
+    }
+    if (["rahu", "ketu"].includes(key)) retrograde = true;
+
+    results.push({
+      key,
+      longitude: sidereal,
+      signIndex,
+      degreeInSign,
+      nakshatraIndex,
+      pada,
+      retrograde,
+    });
+  }
+  return results;
+}
+
 
 
 export const dms = (deg: number) => {
