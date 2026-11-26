@@ -27,10 +27,9 @@ const NVIDIA_MODELS = [
   },
 ] as const;
 const NVIDIA_TIMEOUT_MS = 110_000;
-const NVIDIA_TOTAL_BUDGET_MS = 120_000;
+const NVIDIA_TOTAL_BUDGET_MS = 25_000;
 const NVIDIA_MAX_ATTEMPTS = 3;
-const NVIDIA_RETRY_BACKOFF_MS = 400;
-const NVIDIA_BUDGET_SAFETY_MS = 500;
+const NVIDIA_ATTEMPT_TIMEOUTS_MS = [12_000, 10_000, 8_000] as const;
 const DEFAULT_WIDTH = 832;
 const DEFAULT_HEIGHT = 1216;
 const DEFAULT_SEED = 42;
@@ -167,8 +166,18 @@ function retryableNvidiaStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -201,7 +210,7 @@ export async function nvidiaWallpaper(
   if (cached) return cached;
 
   const budgetMs = opts?.budgetMs ?? NVIDIA_TOTAL_BUDGET_MS;
-  const deadline = Date.now() + Math.max(1, budgetMs - NVIDIA_BUDGET_SAFETY_MS);
+  const deadline = Date.now() + Math.max(1, budgetMs);
   const failures: string[] = [];
   const maxAttempts = Math.min(NVIDIA_MODELS.length, NVIDIA_MAX_ATTEMPTS);
 
@@ -211,28 +220,35 @@ export async function nvidiaWallpaper(
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
 
-    const backoff = hasNext ? NVIDIA_RETRY_BACKOFF_MS : 0;
-    const attemptTimeout = Math.min(NVIDIA_TIMEOUT_MS, Math.max(1, remaining - backoff));
+    const slice =
+      NVIDIA_ATTEMPT_TIMEOUTS_MS[index] ??
+      NVIDIA_ATTEMPT_TIMEOUTS_MS[NVIDIA_ATTEMPT_TIMEOUTS_MS.length - 1];
+    const attemptTimeout = Math.min(
+      NVIDIA_TIMEOUT_MS,
+      Math.max(1, Math.min(remaining, slice)),
+    );
     const attemptDeadline = Date.now() + attemptTimeout;
 
     try {
-      const res = await fetch(candidate.endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
+      const res = await fetchWithTimeout(
+        candidate.endpoint,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt, width, height }),
         },
-        body: JSON.stringify({ prompt, width, height }),
-        signal: AbortSignal.timeout(Math.max(1, attemptDeadline - Date.now())),
-      });
+        Math.max(1, attemptDeadline - Date.now()),
+      );
 
       if (!res.ok) {
         const body = (await res.text()).trim().slice(0, 300);
         const status = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
         const message = `NVIDIA request failed for ${candidate.model} (${status}): ${body}`;
-        if (hasNext && retryableNvidiaStatus(res.status) && Date.now() + backoff < deadline) {
+        if (hasNext && retryableNvidiaStatus(res.status) && Date.now() < deadline) {
           failures.push(message);
-          await sleep(backoff);
           continue;
         }
         throw new Error(message);
@@ -290,16 +306,17 @@ export async function nvidiaWallpaper(
           throw timeoutError;
         }
 
-        const imgRes = await fetch(url, {
-          signal: AbortSignal.timeout(Math.min(NVIDIA_TIMEOUT_MS, downloadTimeout)),
-        });
+        const imgRes = await fetchWithTimeout(
+          url,
+          undefined,
+          Math.min(NVIDIA_TIMEOUT_MS, downloadTimeout),
+        );
         if (!imgRes.ok) {
           const body = (await imgRes.text()).trim().slice(0, 200);
           const status = imgRes.statusText ? `${imgRes.status} ${imgRes.statusText}` : `${imgRes.status}`;
           const message = `NVIDIA image download failed for ${candidate.model} (${status}): ${body}`;
-          if (hasNext && retryableNvidiaStatus(imgRes.status) && Date.now() + backoff < deadline) {
+          if (hasNext && retryableNvidiaStatus(imgRes.status) && Date.now() < deadline) {
             failures.push(message);
-            await sleep(backoff);
             continue;
           }
           throw new Error(message);
@@ -345,9 +362,8 @@ export async function nvidiaWallpaper(
     } catch (err) {
       if (!isTimeoutError(err)) throw err;
       const message = `NVIDIA request timed out for ${candidate.model} after ${attemptTimeout}ms`;
-      if (hasNext && Date.now() + backoff < deadline) {
+      if (hasNext && Date.now() < deadline) {
         failures.push(message);
-        await sleep(backoff);
         continue;
       }
       throw new Error(message);

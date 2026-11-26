@@ -17,7 +17,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 
-import type { BirthInput } from '../lib/astro';
+import type { BirthInput, Chart } from '../lib/astro';
 import type { BirthChartConditions } from '../content/problems';
 import type { ProblemArea } from '../content/vedic-mapping';
 import type { EnvLike } from '../lib/env';
@@ -65,8 +65,41 @@ export interface WallpaperResponse {
  * IMAGE budget: NVIDIA flux.1-dev plus image download, bounded by AI_IMAGE_BUDGET_MS.
  * Both run in PARALLEL via Promise.allSettled.
  */
-const AI_READING_BUDGET_MS = 85_000;
-const AI_IMAGE_BUDGET_MS = 120_000;
+const AI_READING_BUDGET_MS = 60_000;
+const AI_IMAGE_BUDGET_MS = 25_000;
+
+async function deterministicSvgImage(
+  chart: Chart,
+  presetId: string,
+  width: number,
+  height: number,
+  focusAreas?: readonly string[],
+): Promise<WallpaperResponse['image']> {
+  try {
+    const { buildWallpaperSvg } = await import('../lib/wallpaper');
+    const svg = buildWallpaperSvg({ chart, presetId, width, height, focusAreas });
+    if (!svg) return null;
+
+    const bytes = new TextEncoder().encode(svg);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    const base64 =
+      typeof btoa === 'function'
+        ? btoa(binary)
+        : Buffer.from(bytes).toString('base64');
+    return {
+      dataUrl: `data:image/svg+xml;base64,${base64}`,
+      mime: 'image/svg+xml',
+      width,
+      height,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** Await work, but reject with a labelled error if it outlives ms. */
 async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
@@ -254,7 +287,14 @@ export async function buildWallpaperResponse(data: WallpaperRequest, env?: EnvLi
           }, success: true };
         } catch (err) {
           errors.push('Wallpaper unavailable: ' + errorMessage(err));
-          return { image: null, success: false };
+          const fallback = await deterministicSvgImage(
+            chart,
+            preset?.id ?? 'temple-gold',
+            832,
+            1216,
+            data.focusAreas,
+          );
+          return { image: fallback, success: fallback !== null };
         }
       })();
 

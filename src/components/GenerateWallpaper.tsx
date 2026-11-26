@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { computeChart, dms, formatOffset, rashiOf, type BirthInput, type Chart } from '~/lib/astro';
+import { dms, formatOffset, rashiOf, type BirthInput, type Chart } from '~/lib/astro';
 import { PRESETS, GRAHAS, NAKSHATRAS, presetById } from '~/content/vedic-mapping';
 import { LIFE_AREAS, type LifeArea } from '~/content/problems';
 import { buildWallpaperSvg, wallpaperFilename, type WallpaperOptions } from '~/lib/wallpaper';
@@ -14,14 +14,7 @@ import { shouldCallAI } from '~/lib/qualification';
 import { captureSubmit } from '~/lib/crm';
 import { REGIONAL_SYSTEMS, type RegionalSystem } from '~/lib/regional-calculations';
 import { generateInternalReport, type InternalAstrologyReport } from '~/lib/astrology-pipeline';
-import { Reveal, Tag, cx } from '~/lib/ui';
-
-interface Place {
-  label: string;
-  latitude: number;
-  longitude: number;
-  timezone: string | null;
-}
+import { Reveal, cx } from '~/lib/ui';
 
 type WallpaperRequestData = BirthInput & {
   presetId?: string;
@@ -126,7 +119,7 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
       try {
         const report = generateInternalReport(
           input,
-          focusAreas[0] || 'career',
+          focusAreas,
           regionalSystem
         );
         setInternalReport(report);
@@ -177,7 +170,7 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
         setAiReading(null);
         setAiWallpaper(null);
         setAiProvider(null);
-        setAiError(err instanceof Error ? err.message : String(err));
+        setAiError(err instanceof Error ? err.message : typeof err === 'string' ? err : 'AI step unavailable. Please try again.');
       } finally {
         if (paintingTimer) clearTimeout(paintingTimer);
         setAiBusy(null);
@@ -243,7 +236,7 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
     return p;
   }
 
-  const friendlyKeyError = !!aiError && aiError.includes('is not set') && !keysSaved;
+  const friendlyKeyError = typeof aiError === 'string' && aiError.includes('is not set') && !keysSaved;
 
   return (
     <motion.div
@@ -341,6 +334,19 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
                   </div>
                   <p className="text-xs text-mute/60 mb-3">Optional. The AI step calls an external model and sends your chart facts to it. Without it everything stays on your device.</p>
 
+                  <div className="mb-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void generate()}
+                      disabled={aiBusy !== null}
+                      className="rounded-xl border border-gold/30 bg-void/60 px-4 py-2 font-serif text-sm tracking-wide text-bone hover:border-gold hover:bg-gold/10 disabled:opacity-50"
+                    >
+                      {aiBusy === 'reading' ? 'Consulting the Jyotish…' : aiBusy === 'wallpaper' ? 'Painting your wallpaper…' : 'Generate reading & wallpaper'}
+                    </button>
+                    {aiBusy && <span className="text-xs text-gold">AI step in progress…</span>}
+                  </div>
+                  {aiInfo && <p className="mb-3 rounded-lg border border-gold/20 bg-gold/10 p-2 text-xs text-gold">{aiInfo}</p>}
+
                   <div className="rounded-xl border border-gold/20 bg-void/40">
                     <button type="button" aria-expanded={byokOpen} onClick={() => setByokOpen((o) => !o)}
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-mute hover:text-gold">
@@ -376,6 +382,23 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
                   </div>
                 </div>
               </Reveal>
+
+              {aiError && (
+                friendlyKeyError ? (
+                  <div role="alert" className="rounded-xl border border-gold/25 bg-gold/10 p-4 text-sm text-gold">
+                    <p>The chart wallpaper above is complete. Add your own AI keys to unlock the Vedic reading and premium artwork.</p>
+                    <button type="button" onClick={() => setByokOpen(true)}
+                      className="mt-2 rounded-lg border border-gold/40 bg-gold/10 px-3 py-1 text-xs text-gold hover:bg-gold/20">
+                      Add AI keys
+                    </button>
+                  </div>
+                ) : (
+                  <div role="alert" className="rounded-xl border border-gold/25 bg-gold/10 p-4 text-sm text-gold">
+                    <p className="break-words">{aiError}</p>
+                    <p className="mt-1 text-xs text-mute">The chart-accurate wallpaper above still works.</p>
+                  </div>
+                )
+              )}
 
               {aiReading && (
                 <Reveal>
@@ -414,8 +437,19 @@ export default function GenerateWallpaper({ chart, input, onClose }: GenerateWal
                         </div>
                         <div className="rounded bg-white/5 p-3">
                           <h4 className="mb-1 font-medium text-gold">Vimsottari Dasa</h4>
-                          <p className="text-sm"><span className="text-gold">{internalReport.dasha.current}</span> ({internalReport.dasha.balance})</p>
-                          <p className="mt-1 text-xs text-mute/60">Next: {internalReport.dasha.next}</p>
+                          <p className="text-sm">
+                            <span className="text-gold">
+                              {internalReport.dasha.current
+                                ? `${internalReport.dasha.current.lord} (${internalReport.dasha.current.lordDevanagari})`
+                                : 'Not available'}
+                            </span>
+                            {' '}({internalReport.dasha.balance.lord} · {internalReport.dasha.balance.yearsLeft} years)
+                          </p>
+                          <p className="mt-1 text-xs text-mute/60">
+                            Next: {internalReport.dasha.next
+                              ? `${internalReport.dasha.next.lord} (${internalReport.dasha.next.lordDevanagari})`
+                              : 'Not available'}
+                          </p>
                         </div>
                         <div className="rounded bg-gold/10 p-3">
                           <h4 className="mb-1 font-medium text-gold">{internalReport.problemAnalysis.area} Analysis</h4>

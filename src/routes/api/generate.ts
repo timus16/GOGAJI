@@ -1,12 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { buildWallpaperResponse, type WallpaperRequest } from "~/server/ai";
 import { syncedEnv } from "~/server/env-sync";
+import { checkGenerationRateLimit } from "~/server/rate-limit.server";
 
 export const Route = createFileRoute("/api/generate")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         try {
+          const limited = checkGenerationRateLimit(request);
+          if (limited) {
+            return new Response(JSON.stringify({ error: limited }), {
+              status: 429,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           const data = await request.json();
           const date = data.date || data.birthDate;
           const time = data.time || data.birthTime;

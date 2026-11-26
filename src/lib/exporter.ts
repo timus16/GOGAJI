@@ -8,8 +8,8 @@ export const PHONE = { width: 1170, height: 2532 };
 export const DESKTOP = { width: 2560, height: 1440 };
 
 const FONT_FILES = {
-  dev: "/fonts/noto-sans-devanagari-vf.woff2",
-  display: "/fonts/cinzel-vf.woff2",
+  dev: "/fonts/noto-sans-devanagari-400.woff2",
+  display: "/fonts/cinzel-latin.woff2",
 } as const;
 
 function toBase64(bytes: Uint8Array): string {

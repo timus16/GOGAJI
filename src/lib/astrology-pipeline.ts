@@ -10,12 +10,10 @@
  * 6. Internal Report - Generate full Vedic reading
  */
 
-import { computeChart, type Chart, type BirthInput, dms, vimshottariDasha } from '~/lib/astro';
-import { assessChart, chartFactSheet, type BirthChartConditions, LIFE_AREAS } from '~/content/problems';
-import { presetById, type StylePreset } from '~/content/vedic-mapping';
+import { type Chart, type BirthInput, vimshottariDasha } from '~/lib/astro';
+import { GRAHAS, NAKSHATRAS, RASHIS, type StylePreset } from '~/content/vedic-mapping';
+import { LIFE_AREA_PROFILES, lifeAreaProfiles } from '~/content/life-areas';
 import { computeRegionalChart, getRegionalNakshatraName, getRegionalDisplayName, type RegionalSystem } from '~/lib/regional-calculations';
-
-const RASHIS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
 
 // ============================================================
 // INTERNAL ASTROLOGY REPORT
@@ -137,15 +135,19 @@ const OWN_SIGNS: Record<string, string[]> = {
   'Rahu': ['Aquarius'], 'Ketu': ['Scorpio'],
 };
 
-function calculateDignity(planet: string, sign: string, chart: Chart): string {
+function calculateDignity(planet: string, sign: string): PlanetaryPosition['dignity'] {
   if (EXALTATION_POINTS[planet] === sign) return 'exalted';
   if (DEBILITATION_POINTS[planet] === sign) return 'debilitated';
   
   const own = OWN_SIGNS[planet];
-  if (own && own.includes(sign)) return 'own_sign';
+  if ((own ?? []).includes(sign)) return 'own_sign';
   
   // Friend/enemy/neutral would require more complex calculation
   return 'neutral';
+}
+
+function planetDisplayName(key: keyof typeof GRAHAS): string {
+  return GRAHAS[key].english;
 }
 
 function isMaleficPlanet(planet: string): boolean {
@@ -190,12 +192,14 @@ function detectYogas(chart: Chart): Yoga[] {
   
   // Debilitated planets cause yoga
   chart.planets.forEach(p => {
-    if (calculateDignity(p.key.charAt(0).toUpperCase() + p.key.slice(1), RASHIS[p.signIndex], chart) === 'debilitated') {
+    const planetName = planetDisplayName(p.key);
+    const sign = RASHIS[p.signIndex]?.english ?? 'Unknown';
+    if (calculateDignity(planetName, sign) === 'debilitated') {
       yogas.push({
-        name: `\${p.key} Debilitation Yoga`,
-        name: `${p.key.charAt(0).toUpperCase() + p.key.slice(1)} Debilitation Yoga`,
-        description: `${p.key.charAt(0).toUpperCase() + p.key.slice(1)} is debilitated - requires remediation through gem/chanting`,
-        planets: [p.key.charAt(0).toUpperCase() + p.key.slice(1)],
+        name: `${planetName} Debilitation Yoga`,
+        description: `${planetName} is debilitated - requires remediation through gem/chanting`,
+        type: 'negative',
+        planets: [planetName],
       });
     }
   });
@@ -207,7 +211,7 @@ function detectYogas(chart: Chart): Yoga[] {
 // REMEDY GENERATION
 // ============================================================
 
-function generateRemedies(planet: string, type: string): Remedy[] {
+function generateRemedies(planet: string): Remedy[] {
   const remedies: Remedy[] = [];
   
   const mantras: Record<string, string> = {
@@ -278,36 +282,44 @@ function generateRemedies(planet: string, type: string): Remedy[] {
 // PROBLEM ANALYSIS
 // ============================================================
 
-function analyzeProblem(chart: Chart, conditions: BirthChartConditions, problem: string): ProblemAnalysis {
-  const lifeArea = LIFE_AREAS.find(la => la.id === problem) || LIFE_AREAS[0];
+function analyzeProblem(chart: Chart, focusAreas: string | readonly string[]): ProblemAnalysis {
+  const requestedAreas: readonly string[] = typeof focusAreas === 'string' ? [focusAreas] : focusAreas;
+  const profiles = lifeAreaProfiles(requestedAreas);
+  const lifeArea = profiles[0] ?? LIFE_AREA_PROFILES.career;
+  const selectedAreas = profiles.length > 0 ? profiles : [lifeArea];
+  const areaLabel = selectedAreas.map(profile => profile.label).join(', ');
   
   // Find afflicted planets related to problem area
   const afflictedPlanets: PlanetaryPosition[] = [];
   const afflictedHouses: number[] = [];
   
   // Get house numbers for the problem area
-  const problemHouses = lifeArea.houses;
+  const problemHouses = [...new Set(selectedAreas.flatMap(profile => (
+    profile.secondaryHouse ? [profile.house, profile.secondaryHouse] : [profile.house]
+  )))];
   
   // Check which planets are in afflicted houses
   chart.planets.forEach(p => {
-    const house = p.house;
+    const house = chart.houses.findIndex(h => (h.planets ?? []).includes(p.key)) + 1;
     if (problemHouses.includes(house)) {
-      const dignity = calculateDignity(p.key.charAt(0).toUpperCase() + p.key.slice(1), RASHIS[p.signIndex], chart);
+      const planetName = planetDisplayName(p.key);
+      const sign = RASHIS[p.signIndex];
+      const dignity = calculateDignity(planetName, sign?.english ?? 'Unknown');
       if (dignity === 'debilitated' || dignity === 'enemy') {
         afflictedPlanets.push({
-          name: p.key,
-          sign: p.signIndex === undefined ? 'Unknown' : ['', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'][p.signIndex],
-          signLord: ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn', 'Rahu', 'Ketu', 'Ketu', 'Rahu', 'Sun'][p.signIndex || 0],
+          name: planetName,
+          sign: sign?.name ?? 'Unknown',
+          signLord: sign ? GRAHAS[sign.lord]?.english ?? 'Unknown' : 'Unknown',
           house,
           degree: p.degreeInSign,
           dignity,
           retrograde: p.retrograde || false,
-          nakshatra: p.nakshatraIndex !== undefined ? ['Ashwini', 'Bharani', 'Kritika', 'Rohini', 'Mrigashira', 'Ardra', 'Punarvasu', 'Pushya', 'Ashlesha', 'Magha', 'Purva Phalguni', 'Uttara Phalguni', 'Hasta', 'Chitra', 'Swati', 'Vishakha', 'Anuradha', 'Jyeshtha', 'Mula', 'Purva Ashadha', 'Uttara Ashadha', 'Shravana', 'Dhanishtha', 'Shatabhisha', 'Purva Bhadrapada', 'Uttara Bhadrapada', 'Revati'][p.nakshatraIndex] : 'Unknown',
+          nakshatra: NAKSHATRAS[p.nakshatraIndex]?.name ?? 'Unknown',
           pada: p.pada || 1,
           aspects: [],
           conjunctions: [],
-          isMalefic: isMaleficPlanet(p.key),
-          isBenefic: isBeneficPlanet(p.key),
+          isMalefic: isMaleficPlanet(planetName),
+          isBenefic: isBeneficPlanet(planetName),
         });
         afflictedHouses.push(house);
       }
@@ -317,20 +329,20 @@ function analyzeProblem(chart: Chart, conditions: BirthChartConditions, problem:
   // Generate remedies for afflicted planets
   const allRemedies: Remedy[] = [];
   afflictedPlanets.forEach(p => {
-    allRemedies.push(...generateRemedies(p.name, problem));
+    allRemedies.push(...generateRemedies(p.name));
   });
   
   // Calculate strength score (simplified)
   const strengthScore = Math.max(20, 100 - (afflictedPlanets.length * 15) - (afflictedHouses.length * 10));
   
   return {
-    area: lifeArea.name,
+    area: areaLabel,
     afflictedPlanets,
     afflictedHouses: [...new Set(afflictedHouses)],
     strengthScore,
     remedies: allRemedies.slice(0, 5),  // Top 5 remedies
-    transitImpact: `Current transits are affecting your ${lifeArea.name} sector.`,
-    currentDashaImpact: `Your current dasa period is influencing ${lifeArea.name}.`,
+    transitImpact: `Current transits are affecting your ${areaLabel} sector.`,
+    currentDashaImpact: `Your current dasa period is influencing ${areaLabel}.`,
   };
 }
 
@@ -338,27 +350,24 @@ function analyzeProblem(chart: Chart, conditions: BirthChartConditions, problem:
 // BUILD PLANETARY POSITIONS
 // ============================================================
 
-const RASHI_NAMES = ['', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
-const GRAHA_LORDS = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn', 'Rahu', 'Ketu'];
-const NAKSHATRA_NAMES = ['Ashwini', 'Bharani', 'Kritika', 'Rohini', 'Mrigashira', 'Ardra', 'Punarvasu', 'Pushya', 'Ashlesha', 'Magha', 'Purva Phalguni', 'Uttara Phalguni', 'Hasta', 'Chitra', 'Swati', 'Vishakha', 'Anuradha', 'Jyeshtha', 'Mula', 'Purva Ashadha', 'Uttara Ashadha', 'Shravana', 'Dhanishtha', 'Shatabhisha', 'Purva Bhadrapada', 'Uttara Bhadrapada', 'Revati'];
-
 function buildPlanetaryPositions(chart: Chart): PlanetaryPosition[] {
   return chart.planets.map(p => {
-    const sign = p.signIndex !== undefined ? RASHI_NAMES[p.signIndex] : 'Unknown';
+    const sign = RASHIS[p.signIndex];
+    const planetName = planetDisplayName(p.key);
     return {
-      name: p.key,
-      sign,
-      signLord: GRAHA_LORDS[p.signIndex || 0] || 'Unknown',
-      house: p.house || 1,
+      name: planetName,
+      sign: sign?.name ?? 'Unknown',
+      signLord: sign ? GRAHAS[sign.lord]?.english ?? 'Unknown' : 'Unknown',
+      house: chart.houses.findIndex(h => (h.planets ?? []).includes(p.key)) + 1,
       degree: p.degreeInSign || 0,
-      dignity: calculateDignity(p.key, sign, chart),
+      dignity: calculateDignity(planetName, sign?.english ?? 'Unknown'),
       retrograde: p.retrograde || false,
-      nakshatra: p.nakshatraIndex !== undefined ? NAKSHATRA_NAMES[p.nakshatraIndex] : 'Unknown',
+      nakshatra: NAKSHATRAS[p.nakshatraIndex]?.name ?? 'Unknown',
       pada: p.pada || 1,
       aspects: [],  // Would need aspect calculation
       conjunctions: [],  // Would need conjunction detection
-      isMalefic: isMaleficPlanet(p.key),
-      isBenefic: isBeneficPlanet(p.key),
+      isMalefic: isMaleficPlanet(planetName),
+      isBenefic: isBeneficPlanet(planetName),
     };
   });
 }
@@ -372,14 +381,11 @@ function buildPlanetaryPositions(chart: Chart): PlanetaryPosition[] {
  */
 export function generateInternalReport(
   input: BirthInput,
-  problem: string,
+  focusAreas: string | readonly string[],
   regional: RegionalSystem
 ): InternalAstrologyReport {
   // Step 1: KUNDLI_ENGINE - Compute chart with regional adjustments
   const chart = computeRegionalChart(input, regional);
-  
-  // Step 2: Assess chart conditions
-  const conditions = assessChart(chart);
   
   // Build planetary positions
   const planets = buildPlanetaryPositions(chart);
@@ -391,28 +397,32 @@ export function generateInternalReport(
   const dasha = vimshottariDasha(chart, 5);
   
   // Analyze problem
-  const problemAnalysis = analyzeProblem(chart, conditions, problem);
+  const problemAnalysis = analyzeProblem(chart, focusAreas);
   
   // Get regional info
   const regionalNakshatraName = getRegionalNakshatraName(chart, regional);
   const regionalDisplayName = getRegionalDisplayName(chart);
+  const lagnaSign = RASHIS[chart.lagna.signIndex];
+  const moonSign = RASHIS[chart.moon.signIndex];
+  const sunSign = RASHIS[chart.sunSign];
+  const sunPlacement = chart.planets.find(p => p.key === 'sun');
   
   return {
     // Core chart
-    lagna: RASHI_NAMES[chart.lagna.signIndex] || 'Aries',
-    lagnaLord: GRAHA_LORDS[chart.lagna.signIndex] || 'Mars',
+    lagna: lagnaSign?.name ?? 'Aries',
+    lagnaLord: GRAHAS[lagnaSign?.lord ?? 'mars']?.english ?? 'Mars',
     lagnaDegree: chart.lagna.degreeInSign,
-    moon: RASHI_NAMES[chart.moon.signIndex] || 'Aries',
-    moonLord: GRAHA_LORDS[chart.moon.signIndex] || 'Moon',
+    moon: moonSign?.name ?? 'Aries',
+    moonLord: GRAHAS[moonSign?.lord ?? 'moon']?.english ?? 'Moon',
     moonDegree: chart.moon.degreeInSign,
-    sun: RASHI_NAMES[chart.sunSign] || 'Leo',
-    sunLord: GRAHA_LORDS[chart.sunSign] || 'Sun',
-    sunDegree: chart.sun.degreeInSign,
-    nakshatra: chart.moonNakshatra.name || 'Unknown',
+    sun: sunSign?.name ?? 'Leo',
+    sunLord: GRAHAS[sunSign?.lord ?? 'sun']?.english ?? 'Sun',
+    sunDegree: sunPlacement?.degreeInSign ?? 0,
+    nakshatra: NAKSHATRAS[chart.moon.nakshatraIndex]?.name ?? chart.moonNakshatra.name ?? 'Unknown',
     pada: chart.moonPada || 1,
-    rashiLord: chart.moonSign || 'Moon',
+    rashiLord: moonSign?.name ?? 'Moon',
     
-    ascendant: RASHI_NAMES[chart.lagna.signIndex] || 'Aries',
+    ascendant: lagnaSign?.name ?? 'Aries',
     ascendantDegree: chart.lagna.degreeInSign,
     
     // Planetary positions
@@ -464,8 +474,7 @@ export function generateRandomSeed(): number {
 export function generateWallpaperPrompt(
   chart: Chart,
   problem: string,
-  preset: StylePreset,
-  regional: RegionalSystem
+  preset: StylePreset
 ): string {
   const energy = getEnergyForProblem(problem);
   const chakra = getChakraForNakshatra(chart.moonNakshatra.name);
@@ -475,7 +484,7 @@ export function generateWallpaperPrompt(
   const presetName = preset.name.split(' ')[0];  // e.g., "Temple" from "Temple Gold"
   const mood = energy === 'confidence' ? 'ascending' : energy === 'abundance' ? 'serene' : 'dynamic';
   
-  return `${presetName} Vedic cosmic wallpaper, ${energy} energy, divine ${chakra} motif, sacred ${chakra} chakra activation, celestial ${mood} atmosphere, ultra detailed, 4K, cinematic lighting, Indian spiritual aesthetics, premium design, no text, no letters, no watermark, no lettering, no caption`;
+  return `${presetName} Vedic cosmic wallpaper, ${energy} energy, divine ${chakra} motif, sacred ${symbols.join(' and ')} motifs, ${chakra} chakra activation, celestial ${mood} atmosphere, ultra detailed, 4K, cinematic lighting, Indian spiritual aesthetics, premium design, no text, no letters, no watermark, no lettering, no caption`;
 }
 
 function getEnergyForProblem(problem: string): string {
@@ -493,14 +502,14 @@ function getEnergyForProblem(problem: string): string {
 }
 
 function getChakraForNakshatra(nakshatra: string): string {
-  const index = NAKSHATRA_NAMES.indexOf(nakshatra);
+  const index = NAKSHATRAS.findIndex(n => n.name === nakshatra);
   const chakraMap = ['muladhara', 'svadhisthana', 'manipura', 'anahata', 'vishuddha', 'ajna', 'ajna', 'vishuddha', 'svadhisthana', 'manipura', 'anahata', 'vishuddha', 'vishuddha', 'ajna', 'ajna', 'anahata', 'manipura', 'svadhisthana', 'svadhisthana', 'muladhara', 'muladhara', 'vishuddha', 'ajna', 'ajna', 'muladhara', 'muladhara', 'muladhara'];
   return chakraMap[index] || 'ajna';
 }
 
 function getSymbolsForPlanets(chart: Chart): string[] {
   const symbols: string[] = [];
-  const moonSign = RASHI_NAMES[chart.moon.signIndex];
+  const moonSign = RASHIS[chart.moon.signIndex]?.english ?? '';
   
   // Moon sign based symbols
   const moonSymbols: Record<string, string[]> = {
@@ -521,9 +530,7 @@ function getSymbolsForPlanets(chart: Chart): string[] {
   symbols.push(...(moonSymbols[moonSign] || ['sacred']));
   
   // Add ruling planet symbol
-  const nakshatraIndex = NAKSHATRA_NAMES.indexOf(chart.moonNakshatra.name);
-  const rulingPlanets = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
-  const rulingPlanet = rulingPlanets[Math.floor(nakshatraIndex / 3)];
+  const rulingPlanet = GRAHAS[chart.moonNakshatra.lord]?.english ?? 'Ketu';
   
   const planetSymbols: Record<string, string> = {
     Sun: 'sun',

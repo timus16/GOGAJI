@@ -204,11 +204,12 @@ body {
 }
 
 /* ---------- Vignette (agon-agent) ---------- */
-.vignette {
+body.vignette::before {
+  content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 55;
+  z-index: 0;
   background-image: radial-gradient(ellipse at 50% 45%, transparent 40%, rgba(4, 6, 11, 0.55) 85%, rgba(4, 6, 11, 0.9) 100%);
 }
 
