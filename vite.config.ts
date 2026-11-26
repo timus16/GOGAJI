@@ -36,7 +36,8 @@ export default defineConfig({
   builder: {
     esbuild: true,
   },
-  resolve: { alias: { "react-dom/server": "react-dom/server.edge" }, conditions: ["workerd", "edge", "worker", "browser"] },
+  resolve: { alias: { "react-dom/server": "react-dom/server.edge" }, conditions: ["browser", "module", "import", "default"] },
+  ssr: { resolve: { conditions: ["workerd", "edge", "worker", "browser"] } },
   plugins: [
     tailwindcss(),
     tsConfigPaths({

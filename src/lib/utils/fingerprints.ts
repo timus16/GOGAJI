@@ -3,8 +3,8 @@
   const userAgent = request.headers.get('user-agent') || 'unknown'
   const acceptLanguage = request.headers.get('accept-language') || 'unknown'
   
-  const raw = \\|\|\\
-  
+  const raw = `${ip}|${userAgent}|${acceptLanguage}`
+
   let hash = 0
   for (let i = 0; i < raw.length; i++) {
     const char = raw.charCodeAt(i)

@@ -36,18 +36,17 @@ const readLocal = (k: string): string => {
 type WallpaperRequestData = BirthInput & {
   presetId?: string;
   focusAreas?: string[];
-  keys?: { gemini?: string; openrouter?: string; nvidia?: string };
+  keys?: { gemini?: string; nvidia?: string };
 };
 
 /** BYOK keys live in localStorage under this JSON key, masked in the UI. */
 const KEYS_STORAGE = "gogaji.keys";
 
-type AiKeys = { gemini?: string; openrouter?: string; nvidia?: string };
+type AiKeys = { gemini?: string; nvidia?: string };
 
 /** The BYOK fields, in display order. Values are read masked, never echoed. */
 const KEY_FIELDS: { id: keyof AiKeys; label: string }[] = [
   { id: "gemini", label: "Gemini" },
-  { id: "openrouter", label: "OpenRouter" },
   { id: "nvidia", label: "NVIDIA" },
 ];
 
@@ -69,7 +68,6 @@ const readSavedKeys = (): AiKeys => {
     const parsed = JSON.parse(localStorage.getItem(KEYS_STORAGE) ?? "{}") as AiKeys;
     return {
       gemini: typeof parsed.gemini === "string" ? parsed.gemini : "",
-      openrouter: typeof parsed.openrouter === "string" ? parsed.openrouter : "",
       nvidia: typeof parsed.nvidia === "string" ? parsed.nvidia : "",
     };
   } catch { return {}; }
@@ -177,11 +175,10 @@ async function zoneFor(lat: number, lon: number): Promise<string | null> {
   return null;
 }
 
-/** Human label for the LLM provider badge, e.g. "Gemini" / "OpenRouter". */
+/** Human label for the LLM provider badge, e.g. "Gemini". */
 function providerName(p: string | null): string | null {
   if (!p) return null;
   if (p === "gemini") return "Gemini";
-  if (p === "openrouter") return "OpenRouter";
   return p;
 }
 const MONTHS = [
@@ -249,7 +246,7 @@ export default function Generator({ initialName = "", subject = "self", autoGene
   // BYOK: provider keys typed by the user, persisted in localStorage
   // (KEYS_STORAGE) and hydrated after mount so SSR and the first client render
   // agree. Masked inputs only; values are never logged.
-  const [aiKeys, setAiKeys] = useState<AiKeys>({ gemini: "", openrouter: "", nvidia: "" });
+  const [aiKeys, setAiKeys] = useState<AiKeys>({ gemini: "", nvidia: "" });
   const [regionalSystem, setRegionalSystem] = useState<RegionalSystem>("vedic");
   const [internalReport, setInternalReport] = useState<InternalAstrologyReport | null>(null);
   const [showReport, setShowReport] = useState(false);
@@ -307,7 +304,7 @@ export default function Generator({ initialName = "", subject = "self", autoGene
     persistKeys(next);
   };
   const clearKey = (field: keyof AiKeys) => updateKey(field, "");
-  const keysSaved = Boolean(aiKeys.gemini?.trim() || aiKeys.openrouter?.trim() || aiKeys.nvidia?.trim());
+  const keysSaved = Boolean(aiKeys.gemini?.trim() || aiKeys.nvidia?.trim());
 
   const doSearch = async () => {
     if (!query.trim()) return;
@@ -418,8 +415,7 @@ export default function Generator({ initialName = "", subject = "self", autoGene
         // unchanged. Keys are trimmed and only sent when actually set.
         const sentKeys: NonNullable<WallpaperRequestData["keys"]> = {};
         if (aiKeys.gemini?.trim()) sentKeys.gemini = aiKeys.gemini.trim();
-        if (aiKeys.openrouter?.trim()) sentKeys.openrouter = aiKeys.openrouter.trim();
-        if (aiKeys.nvidia?.trim()) sentKeys.nvidia = aiKeys.nvidia.trim();
+            if (aiKeys.nvidia?.trim()) sentKeys.nvidia = aiKeys.nvidia.trim();
         const payload: WallpaperRequestData = {
           ...input, presetId: preset, focusAreas,
           ...(Object.keys(sentKeys).length > 0 ? { keys: sentKeys } : {}),

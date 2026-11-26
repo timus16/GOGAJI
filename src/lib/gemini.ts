@@ -13,7 +13,6 @@
  */
 
 import { geminiKey, type EnvLike } from "~/lib/env";
-import { openrouterReading } from "~/lib/openrouter";
 import { LIFE_AREAS } from "~/content/problems";
 
 /** One remedy: a practice, its mantra in both scripts, its deity and its day. */
@@ -45,7 +44,7 @@ export interface Reading {
 }
 
 /** Which provider answered. */
-export type ReadingProvider = "gemini" | "openrouter" | "baidu";
+export type ReadingProvider = "gemini";
 
 /** The closed vocabulary a reading may focus on. The domain layer
  * (`~/content/problems`) owns the canonical list, so it is imported here
@@ -54,10 +53,18 @@ export type ReadingProvider = "gemini" | "openrouter" | "baidu";
  */
 const ALLOWED_LIFE_AREAS: readonly string[] = LIFE_AREAS;
 
-/** The Gemini model id that works with the current key. */
-const GEMINI_MODEL = "gemini-3.8-flash";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_MODELS = [
+  "gemini-3.5-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3.5-flash",
+] as const;
+const GEMINI_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_TIMEOUT_MS = 60_000;
+const GEMINI_TOTAL_BUDGET_MS = 85_000;
+const GEMINI_MAX_ATTEMPTS = 4;
+const GEMINI_RETRY_BACKOFF_MS = 400;
+const GEMINI_BUDGET_SAFETY_MS = 500;
 
 /* --------------------------------------------------------------- prompting */
 
@@ -243,6 +250,37 @@ export function isUsableReading(reading: Reading | null): reading is Reading {
 
 /* ----------------------------------------------------------------- providers */
 
+function isTimeoutError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const name = "name" in err ? (err as { name?: unknown }).name : "";
+  return name === "TimeoutError" || name === "AbortError";
+}
+
+function retryableGeminiStatus(status: number): boolean {
+  return status === 404 || status === 429 || status >= 500;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+interface GeminiFailure {
+  model: string;
+  status: string;
+}
+
+function geminiUnavailableError(
+  attemptedModels: readonly string[],
+  failures: readonly GeminiFailure[],
+): Error {
+  const lastFailure = failures[failures.length - 1];
+  const lastFailureDetail = lastFailure
+    ? `last failure: ${lastFailure.model}: ${lastFailure.status}`
+    : "last failure: none";
+  return new Error(
+    `Gemini request failed: Gemini unavailable after ${attemptedModels.length} attempts (${lastFailureDetail}; attempted models: ${attemptedModels.join(", ")})`,
+  );
+}
 
 
 /**
@@ -253,48 +291,95 @@ export async function geminiReading(
   chartSummary: string,
   keyOverride?: string,
   env?: EnvLike,
+  budgetMs = GEMINI_TOTAL_BUDGET_MS,
 ): Promise<Reading> {
   const key = geminiKey(keyOverride, env);
   const prompt = buildReadingPrompt(chartSummary);
+  const deadline = Date.now() + Math.max(1, budgetMs - GEMINI_BUDGET_SAFETY_MS);
+  const attemptedModels: string[] = [];
+  const failures: GeminiFailure[] = [];
+  const maxAttempts = Math.min(GEMINI_MODELS.length, GEMINI_MAX_ATTEMPTS);
 
-  const res = await fetch(GEMINI_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": key,
-    },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
-    }),
-    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
-  });
+  for (let index = 0; index < maxAttempts; index += 1) {
+    const model = GEMINI_MODELS[index];
+    const hasNext = index + 1 < maxAttempts;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw geminiUnavailableError(attemptedModels, failures);
+    }
 
-  if (!res.ok) {
-    const body = (await res.text()).trim().slice(0, 300);
-    throw new Error(`Gemini request failed (${res.status} ${res.statusText}): ${body}`);
+    const backoff = hasNext ? GEMINI_RETRY_BACKOFF_MS : 0;
+    const attemptTimeout = Math.min(GEMINI_TIMEOUT_MS, Math.max(1, remaining - backoff));
+
+    try {
+      attemptedModels.push(model);
+      const res = await fetch(`${GEMINI_ENDPOINT_BASE}/${model}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": key,
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
+        }),
+        signal: AbortSignal.timeout(attemptTimeout),
+      });
+
+      if (!res.ok) {
+        const body = (await res.text()).trim().slice(0, 300);
+        const status = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+        if (res.status === 400 || res.status === 401 || res.status === 403) {
+          throw new Error(`Gemini request failed for ${model} (${status}): ${body}`);
+        }
+        failures.push({ model, status: String(res.status) });
+        if (hasNext && retryableGeminiStatus(res.status) && Date.now() + backoff < deadline) {
+          await sleep(backoff);
+          continue;
+        }
+        throw geminiUnavailableError(attemptedModels, failures);
+      }
+
+      let payload: {
+        candidates?: { content?: { parts?: { text?: unknown }[] } }[];
+      };
+      try {
+        payload = (await res.json()) as typeof payload;
+      } catch (err) {
+        throw new Error(`Gemini returned invalid JSON for ${model}: ${errorMessage(err)}`);
+      }
+
+      const parts = payload?.candidates?.[0]?.content?.parts ?? [];
+      const text = parts
+        .map((part) => (typeof part?.text === "string" ? part.text : ""))
+        .join("")
+        .trim();
+      if (!text) throw new Error(`Gemini returned an empty reading for ${model}`);
+
+      let parsed: unknown;
+      try {
+        parsed = parseJsonPayload(text);
+      } catch (err) {
+        throw new Error(`Gemini returned unreadable JSON for ${model}: ${errorMessage(err)}`);
+      }
+
+      const reading = sanitizeReading(parsed);
+      if (!isUsableReading(reading)) {
+        throw new Error(`Gemini returned an unusable reading for ${model}`);
+      }
+      return reading;
+    } catch (err) {
+      if (!isTimeoutError(err)) throw err;
+      failures.push({ model, status: "timeout" });
+      if (hasNext && Date.now() + backoff < deadline) {
+        await sleep(backoff);
+        continue;
+      }
+      throw geminiUnavailableError(attemptedModels, failures);
+    }
   }
 
-  const payload = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: unknown }[] } }[];
-  };
-  const parts = payload?.candidates?.[0]?.content?.parts ?? [];
-  const text = parts
-    .map((p) => (typeof p?.text === "string" ? p.text : ""))
-    .join("")
-    .trim();
-  if (!text) throw new Error("Gemini returned an empty reading");
-
-  let parsed: unknown;
-  try {
-    parsed = parseJsonPayload(text);
-  } catch (err) {
-    throw new Error(`Gemini returned unreadable JSON: ${errorMessage(err)}`);
-  }
-
-  const reading = sanitizeReading(parsed);
-  if (!isUsableReading(reading)) throw new Error("Gemini returned an unusable reading");
-  return reading;
+  throw geminiUnavailableError(attemptedModels, failures);
 }
 
 /* -------------------------------------------------------------------- cache */
@@ -340,13 +425,14 @@ function cacheReading(
 }
 
 /**
- * The reading chain: a cache hit first, then Gemini. If it fails, try OpenRouter.
- * If both fail, throw error with both failures.
+ * The reading chain: a cache hit first, then Gemini only.
+ * If Gemini fails, throw one error naming that failure.
  */
 export async function readKundli(
   chartSummary: string,
-  keyOverrides?: { gemini?: string; openrouter?: string },
+  keyOverrides?: { gemini?: string },
   env?: EnvLike,
+  budgetMs = GEMINI_TOTAL_BUDGET_MS,
 ): Promise<{ reading: Reading; provider: ReadingProvider }> {
   const cached = readCachedReading(chartSummary);
   if (cached) return cached;
@@ -354,19 +440,11 @@ export async function readKundli(
   const failures: string[] = [];
 
   try {
-    const reading = await geminiReading(chartSummary, keyOverrides?.gemini, env);
+    const reading = await geminiReading(chartSummary, keyOverrides?.gemini, env, budgetMs);
     cacheReading(chartSummary, reading, "gemini");
     return { reading, provider: "gemini" };
   } catch (err) {
     failures.push(`gemini: ${errorMessage(err)}`);
-  }
-
-  try {
-    const reading = await openrouterReading(chartSummary, keyOverrides?.openrouter, env);
-    cacheReading(chartSummary, reading, "openrouter");
-    return { reading, provider: "openrouter" };
-  } catch (err) {
-    failures.push(`openrouter: ${errorMessage(err)}`);
   }
 
   // Baidu provider exists in src/lib/baidu.ts but is not in the active chain.

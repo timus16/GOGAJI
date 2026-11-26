@@ -24,3 +24,26 @@ src/routeTree.gen.ts
 test-results/
 playwright-report/
 .neon
+# Cloudflare and local build output.
+/.wrangler/
+/.vite/
+/wasm/astro/target/
+/public/wasm/
+
+# Lockfile not used by this project.
+/package-lock.json
+
+# Root-level scratch scripts, logs, and editor leftovers.
+/fix*
+/write*
+/update*
+/edit*
+/test-*.ts
+*.bak
+*.new
+*.old
+*.tmp
+*.log
+/debug-*.png
+/*-wallpaper-result.png
+/playwright.local*.ts

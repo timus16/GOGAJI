@@ -12,8 +12,25 @@ import { GRAHAS, type StylePreset } from "~/content/vedic-mapping";
 import type { Reading } from "~/lib/gemini";
 import type { BirthInput } from "~/lib/astro";
 
-const NVIDIA_ENDPOINT = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev";
+const NVIDIA_MODELS = [
+  {
+    model: "flux.1-schnell",
+    endpoint: "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-schnell",
+  },
+  {
+    model: "flux.1-dev",
+    endpoint: "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev",
+  },
+  {
+    model: "stable-diffusion-xl",
+    endpoint: "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl",
+  },
+] as const;
 const NVIDIA_TIMEOUT_MS = 110_000;
+const NVIDIA_TOTAL_BUDGET_MS = 120_000;
+const NVIDIA_MAX_ATTEMPTS = 3;
+const NVIDIA_RETRY_BACKOFF_MS = 400;
+const NVIDIA_BUDGET_SAFETY_MS = 500;
 const DEFAULT_WIDTH = 832;
 const DEFAULT_HEIGHT = 1216;
 const DEFAULT_SEED = 42;
@@ -140,6 +157,20 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
 
 
 
+function isTimeoutError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const name = "name" in err ? (err as { name?: unknown }).name : "";
+  return name === "TimeoutError" || name === "AbortError";
+}
+
+function retryableNvidiaStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Paint one wallpaper background with FLUX.1-dev.
  *
@@ -151,79 +182,180 @@ function toDataUrl(bytes: Uint8Array, fallbackMime: string): { dataUrl: string; 
  */
 export async function nvidiaWallpaper(
   prompt: string,
-  opts?: { width?: number; height?: number; seed?: number; keyOverride?: string; env?: EnvLike },
+  opts?: {
+    width?: number;
+    height?: number;
+    seed?: number;
+    keyOverride?: string;
+    env?: EnvLike;
+    budgetMs?: number;
+  },
 ): Promise<WallpaperImage> {
   const key = nvidiaKey(opts?.keyOverride, opts?.env);
   const width = opts?.width ?? DEFAULT_WIDTH;
   const height = opts?.height ?? DEFAULT_HEIGHT;
   const seed = opts?.seed ?? DEFAULT_SEED;
 
-  // Serve an identical request from the cache without touching the paid model.
   const cacheKey = imageCacheKey(prompt, width, height, seed);
   const cached = readImageCache(cacheKey);
   if (cached) return cached;
 
-  const res = await fetch(NVIDIA_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ prompt, width, height }),
-    signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS),
-  });
+  const budgetMs = opts?.budgetMs ?? NVIDIA_TOTAL_BUDGET_MS;
+  const deadline = Date.now() + Math.max(1, budgetMs - NVIDIA_BUDGET_SAFETY_MS);
+  const failures: string[] = [];
+  const maxAttempts = Math.min(NVIDIA_MODELS.length, NVIDIA_MAX_ATTEMPTS);
 
-  if (!res.ok) {
-    const body = (await res.text()).trim().slice(0, 300);
-    throw new Error(`NVIDIA request failed (${res.status} ${res.statusText}): ${body}`);
-  }
+  for (let index = 0; index < maxAttempts; index += 1) {
+    const candidate = NVIDIA_MODELS[index];
+    const hasNext = index + 1 < maxAttempts;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
 
-  // Clone response to read body twice (once for error, once for JSON)
-  const resClone = res.clone();
-  const payload = (await resClone.json()) as {
-    artifacts?: { base64?: unknown; url?: unknown }[];
-    data?: { b64_json?: unknown; url?: unknown }[];
-  };
+    const backoff = hasNext ? NVIDIA_RETRY_BACKOFF_MS : 0;
+    const attemptTimeout = Math.min(NVIDIA_TIMEOUT_MS, Math.max(1, remaining - backoff));
+    const attemptDeadline = Date.now() + attemptTimeout;
 
-  const artifact = payload?.artifacts?.[0];
-  const inline =
-    typeof artifact?.base64 === "string"
-      ? artifact.base64
-      : typeof payload?.data?.[0]?.b64_json === "string"
-        ? payload.data[0].b64_json
-        : null;
+    try {
+      const res = await fetch(candidate.endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt, width, height }),
+        signal: AbortSignal.timeout(Math.max(1, attemptDeadline - Date.now())),
+      });
 
-  if (inline) {
-    const bytes = new Uint8Array(Buffer.from(inline, "base64"));
-    if (bytes.length === 0) throw new Error("NVIDIA returned an empty image");
-    const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
-    const image: WallpaperImage = { dataUrl, mime, width, height };
-    writeImageCache(cacheKey, image);
-    return image;
-  }
+      if (!res.ok) {
+        const body = (await res.text()).trim().slice(0, 300);
+        const status = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+        const message = `NVIDIA request failed for ${candidate.model} (${status}): ${body}`;
+        if (hasNext && retryableNvidiaStatus(res.status) && Date.now() + backoff < deadline) {
+          failures.push(message);
+          await sleep(backoff);
+          continue;
+        }
+        throw new Error(message);
+      }
 
-  const url =
-    typeof artifact?.url === "string"
-      ? artifact.url
-      : typeof payload?.data?.[0]?.url === "string"
-        ? payload.data[0].url
-        : null;
+      let payload: {
+        artifacts?: { base64?: unknown; url?: unknown }[];
+        data?: { b64_json?: unknown; url?: unknown }[];
+        job_id?: unknown;
+        jobId?: unknown;
+        poll_url?: unknown;
+        pollUrl?: unknown;
+        status?: unknown;
+      };
+      try {
+        payload = (await res.json()) as typeof payload;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(`NVIDIA returned invalid JSON for ${candidate.model}: ${detail}`);
+      }
 
-  if (url) {
-    const imgRes = await fetch(url, { signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS) });
-    if (!imgRes.ok) {
-      const body = (await imgRes.text()).trim().slice(0, 200);
-      throw new Error(`NVIDIA image download failed (${imgRes.status} ${imgRes.statusText}): ${body}`);
+      const artifact = payload?.artifacts?.[0];
+      const inline =
+        typeof artifact?.base64 === "string"
+          ? artifact.base64
+          : typeof payload?.data?.[0]?.b64_json === "string"
+            ? payload.data[0].b64_json
+            : null;
+
+      if (inline) {
+        const bytes = new Uint8Array(Buffer.from(inline, "base64"));
+        if (bytes.length === 0) {
+          throw new Error(`NVIDIA returned an empty image for ${candidate.model}`);
+        }
+        const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
+        const image: WallpaperImage = { dataUrl, mime, width, height };
+        writeImageCache(cacheKey, image);
+        return image;
+      }
+
+      const url =
+        typeof artifact?.url === "string"
+          ? artifact.url
+          : typeof payload?.data?.[0]?.url === "string"
+            ? payload.data[0].url
+            : null;
+
+      if (url) {
+        const downloadTimeout = attemptDeadline - Date.now();
+        if (downloadTimeout <= 0) {
+          const timeoutError = new Error(
+            `NVIDIA image download timed out for ${candidate.model}: attempt budget exhausted`,
+          );
+          timeoutError.name = "TimeoutError";
+          throw timeoutError;
+        }
+
+        const imgRes = await fetch(url, {
+          signal: AbortSignal.timeout(Math.min(NVIDIA_TIMEOUT_MS, downloadTimeout)),
+        });
+        if (!imgRes.ok) {
+          const body = (await imgRes.text()).trim().slice(0, 200);
+          const status = imgRes.statusText ? `${imgRes.status} ${imgRes.statusText}` : `${imgRes.status}`;
+          const message = `NVIDIA image download failed for ${candidate.model} (${status}): ${body}`;
+          if (hasNext && retryableNvidiaStatus(imgRes.status) && Date.now() + backoff < deadline) {
+            failures.push(message);
+            await sleep(backoff);
+            continue;
+          }
+          throw new Error(message);
+        }
+        const bytes = new Uint8Array(await imgRes.arrayBuffer());
+        if (bytes.length === 0) {
+          throw new Error(`NVIDIA image download was empty for ${candidate.model}`);
+        }
+        const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
+        const image: WallpaperImage = { dataUrl, mime, width, height };
+        writeImageCache(cacheKey, image);
+        return image;
+      }
+
+      const jobId =
+        typeof payload.job_id === "string"
+          ? payload.job_id
+          : typeof payload.jobId === "string"
+            ? payload.jobId
+            : null;
+      const pollUrl =
+        typeof payload.poll_url === "string"
+          ? payload.poll_url
+          : typeof payload.pollUrl === "string"
+            ? payload.pollUrl
+            : null;
+      const status = typeof payload.status === "string" ? payload.status : "";
+      const queued = ["queued", "pending", "submitted", "processing"].includes(
+        status.toLowerCase(),
+      );
+      if (jobId || pollUrl || queued) {
+        const reference = jobId
+          ? `job ${jobId}`
+          : pollUrl
+            ? `poll URL ${pollUrl}`
+            : `status ${status}`;
+        throw new Error(
+          `NVIDIA returned an asynchronous job for ${candidate.model} (${reference}); no synchronous image data was included`,
+        );
+      }
+
+      throw new Error(`NVIDIA returned no image data for ${candidate.model}`);
+    } catch (err) {
+      if (!isTimeoutError(err)) throw err;
+      const message = `NVIDIA request timed out for ${candidate.model} after ${attemptTimeout}ms`;
+      if (hasNext && Date.now() + backoff < deadline) {
+        failures.push(message);
+        await sleep(backoff);
+        continue;
+      }
+      throw new Error(message);
     }
-    const bytes = new Uint8Array(await imgRes.arrayBuffer());
-    if (bytes.length === 0) throw new Error("NVIDIA image download was empty");
-    const { dataUrl, mime } = toDataUrl(bytes, "image/jpeg");
-    const image: WallpaperImage = { dataUrl, mime, width, height };
-    writeImageCache(cacheKey, image);
-    return image;
   }
 
-  throw new Error("NVIDIA returned no image data");
+  const detail = failures.length ? `: ${failures.join(" | ")}` : "";
+  throw new Error(`NVIDIA image budget exhausted after ${budgetMs}ms${detail}`);
 }
 
 /* ------------------------------------------------------------- the prompt */

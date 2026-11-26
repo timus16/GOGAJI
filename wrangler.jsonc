@@ -13,6 +13,20 @@
   "vars": {
     "PUBLIC_SITE_URL": "https://nakshatra-canvas.pages.dev"
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "JOBS_DO",
+        "class_name": "JobsDurableObject"
+      }
+    ]
+  },
+  "exports": {
+    "JobsDurableObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
   "observability": {
     "enabled": true
   }

@@ -67,6 +67,7 @@ export interface Chart {
   lagna: { longitude: number; signIndex: number; degreeInSign: number; nakshatraIndex: number; pada: number };
   moon: Placement;
   planets: Placement[];
+  GRAHAS: Placement[];
   moonNakshatra: Nakshatra;
   moonPada: number;
   /** pada syllable, Devanagari + roman */
@@ -343,6 +344,7 @@ export function computeChartSync(input: BirthInput): Chart {
     },
     moon,
     planets,
+    GRAHAS: planets,
     moonNakshatra,
     moonPada,
     syllable,

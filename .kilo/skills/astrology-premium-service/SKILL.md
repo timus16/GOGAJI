@@ -1,6 +1,6 @@
 ﻿---
 name: astrology-premium-service
-description: '"'"'Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the multi-provider reading step (active chain: Gemini -> OpenRouter; Baidu exists but is NOT in the active chain), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".'"'"'
+description: '"'"'Use when generating a Vedic astrological reading or wallpaper for a user, extending the Vedic content/problem-set data, reviewing astrological accuracy, or explaining the GOGAJI two-AI pipeline. Covers the deterministic chart engine, the problem-set domain model, the Gemini reading step (the only active provider), the NVIDIA flux.1-dev artwork step, and the provenance/accuracy rules. Triggers on "kundli reading", "Vedic wallpaper", "nakshatra", "problem set", "remedy", "astrological condition", "yantra", "chart engine".'"'"'
 ---
 
 # Astrology Premium Service (GOGAJI)
@@ -16,11 +16,10 @@ contract for that pipeline.
 | `src/lib/astro.ts` | Chart engine. Pure functions, no I/O, browser-safe. `computeChart`, `localToUtc`, `lahiriAyanamsa`, `moonLongitude`, `meanNode`, `tropicalAscendant`, `dms`, `rashiOf`, `formatOffset` |
 | `src/content/vedic-mapping.ts` | **All** Vedic data: `GRAHAS` (colour/mantra/yantra), `NAKSHATRAS` (27, with lord/deity/symbol/motif/gana/pada-syllables), `RASHIS`, `PRESETS` (4 style archetypes), `NAK_SPAN`, `PADA_SPAN` |
 | `src/content/problems.ts` | Problem-set domain model: `LifeArea` + `LIFE_AREAS` (8), `AstroCondition`, `BirthChartConditions`, `assessChart`, `chartFactSheet` (the fact sheet builder) |
-| `src/lib/gemini.ts` | Reading layer: canonical prompt, shared `sanitizeReading`/`parseJsonPayload`/`errorMessage`/`isUsableReading`, the 24h reading cache, and the active chain `readKundli(chartSummary) -> { reading, provider }` (Gemini -> OpenRouter; Baidu kept but NOT in the chain). `geminiReading` is the first provider; `buildReadingPrompt(chartSummary, focusAreas?)` threads the checklist |
-| `src/lib/openrouter.ts` | Second reading provider (`openrouterReading`, active chain): OpenRouter zero-priced models, at most 3 attempts |
+| `src/lib/gemini.ts` | Reading layer: canonical prompt, shared `sanitizeReading`/`parseJsonPayload`/`errorMessage`/`isUsableReading`, the 24h reading cache, and `readKundli(chartSummary) -> { reading, provider }` (Gemini). `geminiReading` is the provider; `buildReadingPrompt(chartSummary, focusAreas?)` threads the checklist |
 | `src/lib/baidu.ts` | Third reading provider (`baiduReading`): Baidu Qianfan / ERNIE; the key travels only in the `Authorization` header, never in the URL. Present but **not** in the active chain |
 | `src/lib/nvidia.ts` | Artwork step. `promptFromBrief(reading, chartFacts, { focusAreas })`, `nvidiaWallpaper(prompt, opts)`, plus a 7-day per-instance image cache and magic-byte mime sniffing (`sniffImageMime`) |
-| `src/lib/server-key.ts` | Single server-only place that reads the four provider keys from `process.env` (`geminiKey`, `openrouterKey`, `baiduKey`, `nvidiaKey`) |
+| `src/lib/server-key.ts` | Single server-only place that reads the provider keys from `process.env` (`geminiKey`, `baiduKey`, `nvidiaKey`) |
 | `src/server/ai.ts` | Server function that orchestrates the whole thing (`generateWallpaper` / `buildWallpaperResponse`): the `shouldCallAI` qualification gate (before any provider call), request-wide AI budget, in-memory per-IP rate limit, never throws |
 | `src/lib/wallpaper.ts` | Deterministic SVG wallpaper renderer (`buildWallpaperSvg`) - the free fallback |
 | `scripts/validate-chart.ts` | Engine validator + magic-square verifier |
@@ -46,7 +45,7 @@ contract for that pipeline.
 | Concern | Owner | Why |
 |---|---|---|
 | Planetary longitudes, ayanāṃśa, lagna, house placement, retrogression | `src/lib/astro.ts` - deterministic Meeus/JPL algorithms | Reproducible, testable, externally checkable against NASA/JPL Horizons |
-| Interpretation of the computed facts | Gemini, then OpenRouter - the active chain; Baidu exists but is not wired in (`src/lib/gemini.ts`) | Language, framing, remediation phrasing; every provider gets the same prompt and the same validator |
+| Interpretation of the computed facts | Gemini - the only active provider (`src/lib/gemini.ts`) | Language, framing, remediation phrasing; every provider gets the same prompt and the same validator |
 | Wallpaper artwork | NVIDIA flux.1-dev (`src/lib/nvidia.ts`) | Image generation |
 | Yantra grid, kundli, mandala, palette, Devanagari typography | `src/lib/wallpaper.ts` - deterministic SVG | Vector precision, zero cost, works with no API key |
 
@@ -79,7 +78,7 @@ a nakshatra, a pada, a house placement, or a retrogression flag. If a fact is no
 
 ```
 WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[];
-  keys?: { gemini?; openrouter?; nvidia? } }   // BYOK, per-request, from localStorage `gogaji.keys`
+  keys?: { gemini?; nvidia? } }   // BYOK, per-request, from localStorage `gogaji.keys`
    -> shouldCallAI(input, intent)   src/lib/qualification.ts   GATE: BEFORE any provider call;
         blocked => one calm amber line; the deterministic wallpaper still renders
    -> captureSubmit(data, consent)  src/lib/crm.ts   persists ONLY when consent (AI opt-in);
@@ -94,7 +93,7 @@ birth input (name, date, time, place, lat, lon, IANA timezone)
    -> chartFactSheet(chart, conditions, focusAreas)   src/content/problems.ts
         facts{} + flat text (chart facts + conditions + positives; focus areas move the relevant conditions to the front and add a "Querent focus:" line)
    -> readKundli(factSheetText) src/lib/gemini.ts
-        cache hit, else the ACTIVE chain Gemini -> OpenRouter (Baidu exists but is not in the chain)
+        cache hit, else the active provider Gemini
         -> { reading, provider }; empty/unusable answers fall through
         condition, primary: LifeArea[], reading, remedies[], affirmation,
         wallpaperBrief { mood, palette, motifs, inscription }
@@ -236,15 +235,14 @@ birth time given to the minute - see the validator'"'"'s printed sensitivity not
 | Var | Used by | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | `src/lib/gemini.ts` | Google AI Studio key. Read from `process.env` in server-only code. Never written to a file, never echoed |
-| `OPENROUTER_API_KEY` | `src/lib/openrouter.ts` | OpenRouter key (second provider). Same rules |
 | `BAIDU_API_KEY` | `src/lib/baidu.ts` | Baidu Qianfan key (third provider; **not** in the active chain). Sent **only** in the `Authorization` header, never in the URL. Same rules |
 | `NVIDIA_API_KEY` | `src/lib/nvidia.ts` | NVIDIA key (`nvapi-...`). Same rules |
-| (per-request) `keys.gemini` / `keys.openrouter` / `keys.nvidia` | `src/lib/server-key.ts` | BYOK: overrides the env key for that single call (`geminiKey(override)` / `openrouterKey(override)` / `nvidiaKey(override)`); never persisted, never logged, never echoed |
+| (per-request) `keys.gemini` / `keys.nvidia` | `src/lib/server-key.ts` | BYOK: overrides the env key for that single call (`geminiKey(override)` / `nvidiaKey(override)`); never persisted, never logged, never echoed |
 | `AI_RATE_LIMIT_PER_MIN` | `src/server/ai.ts` | Per-IP requests per minute for AI generation. Default 5 |
 | `BAIDU_MODEL_ID` | `src/lib/baidu.ts` | Optional Qianfan model override. Default `ernie-3.5-8k` |
 
-`src/lib/server-key.ts` is the single place that reads them (`geminiKey`, `openrouterKey`,
-`baiduKey`, `nvidiaKey`) and throws a clear missing-key error. Each also accepts an optional per-request override - `geminiKey(override)` / `openrouterKey(override)` / `nvidiaKey(override)` - which supersedes `process.env` for that single call (BYOK: keys arrive from the browser in `WallpaperRequest.keys`; never persisted server-side, never logged, never echoed). On a deployed host the keys
+`src/lib/server-key.ts` is the single place that reads them (`geminiKey`,
+`baiduKey`, `nvidiaKey`) and throws a clear missing-key error. Each also accepts an optional per-request override - `geminiKey(override)` / `nvidiaKey(override)` - which supersedes `process.env` for that single call (BYOK: keys arrive from the browser in `WallpaperRequest.keys`; never persisted server-side, never logged, never echoed). On a deployed host the keys
 come from the **host secret store**, not from `.env`: a `.env` file is local-dev only and is
 not published, so a key that lives only in `.env` is missing live. `.env.example` holds
 placeholders only; a real `.env` is never committed.
@@ -261,8 +259,6 @@ placeholders only; a real `.env` is never committed.
 | NVIDIA alt | `stabilityai/stable-diffusion-3-5-large` | HTTP 404 `page not found` - do not use |
 | NVIDIA alt | `https://integrate.api.nvidia.com/v1/images/generations` | HTTP 404 - do not use |
 | NVIDIA auth | `Authorization: Bearer <NVIDIA_API_KEY>` | Header name exactly as shown |
-| OpenRouter text | `POST https://openrouter.ai/api/v1/chat/completions` | Second provider. Zero-priced models only, at most 3 attempts; retries on 402/404/429/5xx, stops on other statuses |
-| OpenRouter auth | `Authorization: Bearer <OPENROUTER_API_KEY>` + `HTTP-Referer`, `X-Title` | Header only |
 | Baidu Qianfan | `POST https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/<model>` | Third provider; model defaults to `ernie-3.5-8k` (permanent free tier) |
 | Baidu auth | `Authorization: Bearer <BAIDU_API_KEY>` | Header only - **never** in the URL |
 
@@ -280,7 +276,7 @@ Never mislabel; never guess.
 | NVIDIA HTTP 000 / hang | flux.1-schnell or a slow model | Switch to flux.1-dev; keep the 60 s AbortSignal |
 | NVIDIA 404 `page not found` | Wrong endpoint or model id | Use the flux.1-dev genai endpoint |
 | Missing key | `process.env` unset in the host | Fall back to the deterministic SVG; surface a clear message |
-| Provider timeout | 45 s Gemini / 30 s OpenRouter / 30 s Baidu / 60 s NVIDIA | Each is under the 70 s reading / 95 s image budget; the server fn must still return chart + conditions + error |
+| Provider timeout | 45 s Gemini / 30 s Baidu / 60 s NVIDIA | Each is under the 70 s reading / 95 s image budget; the server fn must still return chart + conditions + error |
 | Rate limit tripped | More than `AI_RATE_LIMIT_PER_MIN` (default 5) requests/min from one IP | Return the normal response shape with an `error` and make no provider call |
 
 ### Deploy targets
@@ -321,7 +317,7 @@ extensionless imports.
 ## 7. COST DISCIPLINE
 
 - **One server round-trip per generation.** The client calls the server function once. The
-  reading is the active chain (Gemini -> OpenRouter) that stops at the first usable answer,
+  reading is served by Gemini and stops at the first usable answer,
   and NVIDIA is called once. Never loop the round-trip.
 - **Never re-generate the same work.** Caches now really exist and are per-instance and
   in-memory (they start empty on a restart or a second replica): `src/lib/gemini.ts` keeps
@@ -333,7 +329,7 @@ extensionless imports.
 - **The deterministic SVG path is the free fallback and must keep working with no keys.**
   `buildWallpaperSvg` is a pure function; it must never require a key, a network call, or
   an AI model. If a change breaks the no-key path, that change is wrong.
-- Timeouts are part of the cost model: 45 s Gemini, 30 s OpenRouter, 30 s Baidu, 60 s
+- Timeouts are part of the cost model: 45 s Gemini, 30 s Baidu, 60 s
   NVIDIA, all under a 70 s reading and 95 s image budget. Retry only where the failure is
   transient; do not add unbounded retries.
 - The paid path is rate-limited per IP (`AI_RATE_LIMIT_PER_MIN`, default 5/min, in-memory

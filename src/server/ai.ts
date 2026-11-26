@@ -19,8 +19,10 @@ import { createServerFn } from '@tanstack/react-start';
 
 import type { BirthInput } from '../lib/astro';
 import type { BirthChartConditions } from '../content/problems';
-import type { ProblemArea, GRAHAS } from '../content/vedic-mapping';
+import type { ProblemArea } from '../content/vedic-mapping';
+import type { EnvLike } from '../lib/env';
 import type { Reading, ReadingProvider } from '../lib/gemini';
+import { syncedEnv } from './env-sync';
 
 // Server-only imports - loaded dynamically to avoid client bundle leakage
 
@@ -37,7 +39,7 @@ export type { BirthChartConditions } from '../content/problems';
  * the exact previous, chart-only behaviour.
  * deviceId is optional and used for anonymous quota accounting.
  */
-export type WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[]; keys?: { gemini?: string; openrouter?: string; nvidia?: string }; deviceId?: string };
+export type WallpaperRequest = BirthInput & { presetId?: string; focusAreas?: string[]; keys?: { gemini?: string; nvidia?: string }; deviceId?: string };
 
 /** The fact sheet the model was given - the chart, in flat text. */
 export interface ChartSummary {
@@ -50,7 +52,7 @@ export interface WallpaperResponse {
   chartSummary: ChartSummary;
   conditions: BirthChartConditions;
   reading: Reading | null;
-  image?: { dataUrl: string; mime: string; width: number; height: number };
+  image: { dataUrl: string; mime: string; width: number; height: number } | null;
   wallpaperPrompt: string;
   provider?: ReadingProvider;
   error?: string;
@@ -59,9 +61,9 @@ export interface WallpaperResponse {
 /*
  * ------------------------------------------------------------ AI time budget
  *
- * READ budget: 75s for the reading chain (Gemini 25s + OpenRouter 3x15s = 70s worst case)
- * IMAGE budget: 60s for NVIDIA flux.1-dev call (55s) + image download
- * Both run in PARALLEL via Promise.allSettled. Total worst case ~135s.
+ * READ budget: Gemini-only reading, bounded by AI_READING_BUDGET_MS.
+ * IMAGE budget: NVIDIA flux.1-dev plus image download, bounded by AI_IMAGE_BUDGET_MS.
+ * Both run in PARALLEL via Promise.allSettled.
  */
 const AI_READING_BUDGET_MS = 85_000;
 const AI_IMAGE_BUDGET_MS = 120_000;
@@ -117,12 +119,13 @@ export async function rateLimitedResponse(data: BirthInput, error: string): Prom
     const chart = computeChart(data);
     const conditions = assessChart(chart);
     const sheet = chartFactSheet(chart, conditions);
-    return { chartSummary: sheet, conditions, reading: null, wallpaperPrompt: '', error };
+    return { chartSummary: sheet, conditions, reading: null, image: null, wallpaperPrompt: '', error };
   } catch {
     return {
       chartSummary: { facts: {}, text: '' },
       conditions: { conditions: [], positives: [] },
       reading: null,
+      image: null,
       wallpaperPrompt: '',
       error,
     };
@@ -137,7 +140,7 @@ export async function rateLimitedResponse(data: BirthInput, error: string): Prom
  * resolved with presetById() and folded into the art prompt. The art seed is
  * fresh on every call so the same chart can still get unique artwork.
  */
-export async function buildWallpaperResponse(data: WallpaperRequest): Promise<WallpaperResponse> {
+export async function buildWallpaperResponse(data: WallpaperRequest, env?: EnvLike): Promise<WallpaperResponse> {
   const errors: string[] = [];
 
   try {
@@ -172,9 +175,11 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
     try {
       const authMod = await import('../server/api-auth.server');
       const userId = await (await import('../server/session-helpers')).currentUserId();
-      const premiumStatus = await authMod.premiumStatusFor(userId);
-      isPremium = premiumStatus.isPremium;
-      if (data.keys && (data.keys.gemini || data.keys.openrouter || data.keys.nvidia)) {
+      if (userId) {
+        const premiumStatus = await authMod.premiumStatusFor(userId);
+        isPremium = premiumStatus === 'premium';
+      }
+      if (data.keys && (data.keys.gemini || data.keys.nvidia)) {
         if (!isPremium) {
           errors.push('Bring-your-own AI keys are a Premium feature ? sign in with a Premium account to use your own keys.');
           effectiveKeys = undefined;
@@ -182,7 +187,7 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       }
     } catch {
       isPremium = false;
-      if (data.keys && (data.keys.gemini || data.keys.openrouter || data.keys.nvidia)) {
+      if (data.keys && (data.keys.gemini || data.keys.nvidia)) {
         errors.push('Bring-your-own AI keys are a Premium feature ? sign in with a Premium account to use your own keys.');
         effectiveKeys = undefined;
       }
@@ -220,13 +225,13 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
     let reading: Reading | null = null;
     let provider: ReadingProvider | undefined;
     let readingProduced = false;
-    let image: WallpaperResponse['image'];
+    let image: WallpaperResponse['image'] = null;
     let imageProduced = false;
 
     if (quotaAllowed) {
       const readingPromise = (async () => {
         try {
-          const result = await withTimeout(readKundli(sheet.text, effectiveKeys), AI_READING_BUDGET_MS, 'Reading');
+          const result = await withTimeout(readKundli(sheet.text, effectiveKeys, env, AI_READING_BUDGET_MS), AI_READING_BUDGET_MS, 'Reading');
           return { reading: result.reading, provider: result.provider, success: true };
         } catch (err) {
           errors.push('Reading unavailable: ' + errorMessage(err));
@@ -237,7 +242,7 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       const imagePromise = (async () => {
         try {
           const painted = await withTimeout(
-            nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216, seed, keyOverride: effectiveKeys?.nvidia }),
+            nvidiaWallpaper(wallpaperPrompt, { width: 832, height: 1216, seed, keyOverride: effectiveKeys?.nvidia, env, budgetMs: AI_IMAGE_BUDGET_MS }),
             AI_IMAGE_BUDGET_MS,
             'Wallpaper',
           );
@@ -249,7 +254,7 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
           }, success: true };
         } catch (err) {
           errors.push('Wallpaper unavailable: ' + errorMessage(err));
-          return { image: undefined, success: false };
+          return { image: null, success: false };
         }
       })();
 
@@ -288,9 +293,9 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       chartSummary: sheet,
       conditions,
       reading,
+      image,
       wallpaperPrompt,
     };
-    if (image) response.image = image;
     if (provider) response.provider = provider;
     const error = joinErrors(errors);
     if (error) response.error = error;
@@ -300,8 +305,9 @@ export async function buildWallpaperResponse(data: WallpaperRequest): Promise<Wa
       chartSummary: { facts: {}, text: '' },
       conditions: { conditions: [], positives: [] },
       reading: null,
+      image: null,
       wallpaperPrompt: '',
-      error: 'Could not build the chart: ' + errorMessage(err),
+      error: 'Could not build the chart: ' + (err instanceof Error ? err.message : String(err)),
     };
   }
 }
@@ -312,5 +318,5 @@ export const generateWallpaper = createServerFn({ method: 'POST' })
     const { checkRateLimit } = await import('../server/rate-limit.server');
     const limited = checkRateLimit();
     if (limited) return rateLimitedResponse(data, limited);
-    return buildWallpaperResponse(data);
+    return buildWallpaperResponse(data, syncedEnv());
   });

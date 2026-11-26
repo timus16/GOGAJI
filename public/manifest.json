@@ -1,0 +1,39 @@
+{
+  "name": "Nakshatra Canvas",
+  "short_name": "Nakshatra",
+  "description": "Your child's nakshatra as consecrated art - personalized Vedic wallpapers from exact birth charts",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050301",
+  "theme_color": "#E8B43A",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "education", "reference"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Create Wallpaper",
+      "short_name": "Create",
+      "description": "Generate a new Vedic wallpaper",
+      "url": "/",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Daily Rashifal",
+      "short_name": "Rashifal",
+      "description": "View daily horoscope for all signs",
+      "url": "/rashifal",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    }
+  ],
+  "prefer_related_applications": false
+}

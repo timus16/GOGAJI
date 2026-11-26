@@ -85,6 +85,8 @@ export interface PlanetaryPosition {
 }
 
 export interface DashaInfo {
+  current?: { lord: string; lordDevanagari: string; start: Date; end: Date; years: number };
+  next?: { lord: string; lordDevanagari: string; start: Date; end: Date; years: number };
   balance: { lord: string; lordDevanagari: string; yearsLeft: number };
   periods: { lord: string; lordDevanagari: string; start: Date; end: Date; years: number }[];
   provisionalNotes: string[];
@@ -406,7 +408,7 @@ export function generateInternalReport(
     sun: RASHI_NAMES[chart.sunSign] || 'Leo',
     sunLord: GRAHA_LORDS[chart.sunSign] || 'Sun',
     sunDegree: chart.sun.degreeInSign,
-    nakshatra: chart.moonNakshatra || 'Unknown',
+    nakshatra: chart.moonNakshatra.name || 'Unknown',
     pada: chart.moonPada || 1,
     rashiLord: chart.moonSign || 'Moon',
     
@@ -466,7 +468,7 @@ export function generateWallpaperPrompt(
   regional: RegionalSystem
 ): string {
   const energy = getEnergyForProblem(problem);
-  const chakra = getChakraForNakshatra(chart.moonNakshatra);
+  const chakra = getChakraForNakshatra(chart.moonNakshatra.name);
   const symbols = getSymbolsForPlanets(chart);
   
   // Compose prompt
@@ -519,7 +521,7 @@ function getSymbolsForPlanets(chart: Chart): string[] {
   symbols.push(...(moonSymbols[moonSign] || ['sacred']));
   
   // Add ruling planet symbol
-  const nakshatraIndex = NAKSHATRA_NAMES.indexOf(chart.moonNakshatra);
+  const nakshatraIndex = NAKSHATRA_NAMES.indexOf(chart.moonNakshatra.name);
   const rulingPlanets = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
   const rulingPlanet = rulingPlanets[Math.floor(nakshatraIndex / 3)];
   
@@ -539,6 +541,8 @@ function getSymbolsForPlanets(chart: Chart): string[] {
   
   return symbols;
 }
+
+
 
 
 

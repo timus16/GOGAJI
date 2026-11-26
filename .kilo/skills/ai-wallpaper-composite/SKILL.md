@@ -17,7 +17,7 @@ presented. The pipeline itself is documented in
 WallpaperRequest = BirthInput & {
   presetId?: string;   // style archetype; omitted => previous chart-only behaviour
   focusAreas?: string[]; // subset of the 8 LIFE_AREAS; empty/omitted = all
-  keys?: { gemini?: string; openrouter?: string; nvidia?: string };
+  keys?: { gemini?: string; nvidia?: string };
 }
 ```
 
@@ -29,7 +29,7 @@ The client (`src/components/Generator.tsx`) sends exactly this shape; the server
 **Contract.** The user may type their own provider keys in the browser. They live
 only in `localStorage` under `gogaji.keys`, ride along in `WallpaperRequest.keys`
 per request, and override `process.env` for that single call via
-`geminiKey(override)` / `openrouterKey(override)` / `nvidiaKey(override)`
+`geminiKey(override)` / `nvidiaKey(override)`
 (`src/lib/server-key.ts`). An absent/empty override falls back to the env key.
 
 **Security rules (non-negotiable).**

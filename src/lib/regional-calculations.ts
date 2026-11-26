@@ -198,7 +198,7 @@ function applyMalayalamAdjustments(chart: Chart): void {
     'Uttara Bhadrapada': 'Uthrittadhi',
     'Revati': 'Revathi',
   };
-  (chart as any).malayalamNakshatra = malayalamNames[chart.moonNakshatra] || chart.moonNakshatra;
+  (chart as any).malayalamNakshatra = malayalamNames[chart.moonNakshatra.name] || chart.moonNakshatra.name;
 }
 
 /**
@@ -226,15 +226,15 @@ function applySouthIndianAdjustments(chart: Chart): void {
  */
 export function getRegionalNakshatraName(chart: Chart, regional: RegionalSystem): string {
   if (regional === 'malayalam') {
-    return (chart as any).malayalamNakshatra || chart.moonNakshatra;
+    return (chart as any).malayalamNakshatra || chart.moonNakshatra.name;
   }
   
   const names = REGIONAL_NAKSHATRA_NAMES[regional];
-  if (names && names[chart.moonNakshatra]) {
-    return names[chart.moonNakshatra];
+  if (names && names[chart.moonNakshatra.name]) {
+    return names[chart.moonNakshatra.name];
   }
   
-  return chart.moonNakshatra;
+  return chart.moonNakshatra.name;
 }
 
 /**

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workflow State Machine
  * 
  * Every submission gets a NEW state object.
@@ -24,27 +24,27 @@
  * Error at any step ? DEGRADED (SVG fallback still works)
  */
 
-import { generateSubmissionId, type WorkflowState, type PipelineStep } from '\''./mcp-router'\'';
-import type { BirthInput } from '\''~/lib/astro'\'';
+import { generateSubmissionId, type WorkflowState, type PipelineStep } from './mcp-router';
+import type { BirthInput } from '~/lib/astro';
 
 /** Pipeline step transitions */
 export type StateTransition = 
-  | { from: '\''INITIALIZE'\''; to: '\''KUNDLI_ENGINE'\'' }
-  | { from: '\''KUNDLI_ENGINE'\''; to: '\''PROBLEM_ANALYZER'\'' | '\''WALLPAPER_CONTEXT'\'' }
-  | { from: '\''PROBLEM_ANALYZER'\''; to: '\''WALLPAPER_CONTEXT'\'' }
-  | { from: '\''WALLPAPER_CONTEXT'\''; to: '\''IMAGE_PROMPT'\'' }
-  | { from: '\''IMAGE_PROMPT'\''; to: '\''NVIDIA_IMAGE'\'' }
-  | { from: '\''NVIDIA_IMAGE'\''; to: '\''COMPLETE'\'' | '\''DEGRADED'\'' }
-  | { from: '\''INITIALIZE'\'' | '\''KUNDLI_ENGINE'\'' | '\''PROBLEM_ANALYZER'\'' | '\''WALLPAPER_CONTEXT'\'' | '\''IMAGE_PROMPT'\'' | '\''NVIDIA_IMAGE'\''; to: '\''DEGRADED'\'' };
+  | { from: 'INITIALIZE'; to: 'KUNDLI_ENGINE' }
+  | { from: 'KUNDLI_ENGINE'; to: 'PROBLEM_ANALYZER' | 'WALLPAPER_CONTEXT' }
+  | { from: 'PROBLEM_ANALYZER'; to: 'WALLPAPER_CONTEXT' }
+  | { from: 'WALLPAPER_CONTEXT'; to: 'IMAGE_PROMPT' }
+  | { from: 'IMAGE_PROMPT'; to: 'NVIDIA_IMAGE' }
+  | { from: 'NVIDIA_IMAGE'; to: 'COMPLETE' | 'DEGRADED' }
+  | { from: 'INITIALIZE' | 'KUNDLI_ENGINE' | 'PROBLEM_ANALYZER' | 'WALLPAPER_CONTEXT' | 'IMAGE_PROMPT' | 'NVIDIA_IMAGE'; to: 'DEGRADED' };
 
 /** Valid state transitions */
 const VALID_TRANSITIONS: Record<PipelineStep, PipelineStep[]> = {
-  INITIALIZE: ['\''KUNDLI_ENGINE'\'', '\''DEGRADED'\''],
-  KUNDLI_ENGINE: ['\''PROBLEM_ANALYZER'\'', '\''WALLPAPER_CONTEXT'\'', '\''DEGRADED'\''],
-  PROBLEM_ANALYZER: ['\''WALLPAPER_CONTEXT'\'', '\''DEGRADED'\''],
-  WALLPAPER_CONTEXT: ['\''IMAGE_PROMPT'\'', '\''DEGRADED'\''],
-  IMAGE_PROMPT: ['\''NVIDIA_IMAGE'\'', '\''DEGRADED'\''],
-  NVIDIA_IMAGE: ['\''COMPLETE'\'', '\''DEGRADED'\''],
+  INITIALIZE: ['KUNDLI_ENGINE', 'DEGRADED'],
+  KUNDLI_ENGINE: ['PROBLEM_ANALYZER', 'WALLPAPER_CONTEXT', 'DEGRADED'],
+  PROBLEM_ANALYZER: ['WALLPAPER_CONTEXT', 'DEGRADED'],
+  WALLPAPER_CONTEXT: ['IMAGE_PROMPT', 'DEGRADED'],
+  IMAGE_PROMPT: ['NVIDIA_IMAGE', 'DEGRADED'],
+  NVIDIA_IMAGE: ['COMPLETE', 'DEGRADED'],
   COMPLETE: [],
   DEGRADED: [],
 };
@@ -58,7 +58,7 @@ export function initializeWorkflow(
 ): WorkflowState {
   return {
     submissionId: generateSubmissionId(),
-    step: '\''INITIALIZE'\'',
+    step: 'INITIALIZE',
     birthDetails,
     problem,
     chart: null,
@@ -90,7 +90,7 @@ export function transition(
     // Force to DEGRADED if invalid transition
     return {
       ...state,
-      step: '\''DEGRADED'\'',
+      step: 'DEGRADED',
       error: state.error ?? `Invalid transition from ${state.step} to ${nextStep}`,
       completedAt: Date.now(),
     };
@@ -108,7 +108,7 @@ export function transition(
 export function completeWorkflow(state: WorkflowState): WorkflowState {
   return {
     ...state,
-    step: '\''COMPLETE'\'',
+    step: 'COMPLETE',
     completedAt: Date.now(),
   };
 }
@@ -119,7 +119,7 @@ export function completeWorkflow(state: WorkflowState): WorkflowState {
 export function degradeWorkflow(state: WorkflowState, error: string): WorkflowState {
   return {
     ...state,
-    step: '\''DEGRADED'\'',
+    step: 'DEGRADED',
     error,
     completedAt: Date.now(),
   };
@@ -179,7 +179,7 @@ export function withImageUrl(state: WorkflowState, imageUrl: string): WorkflowSt
  * Check if workflow can produce AI image
  */
 export function canProduceImage(state: WorkflowState): boolean {
-  return state.step !== '\''DEGRADED'\'' && 
+  return state.step !== 'DEGRADED' && 
          state.imagePrompt !== null && 
          state.error === null;
 }

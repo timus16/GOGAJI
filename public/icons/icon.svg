@@ -1,0 +1,77 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#050301;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0D0A06;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8B43A;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#F0C860;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#D44828;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="url(#bg)" stroke="url(#gold)" stroke-width="4"/>
+  
+  <!-- Outer mandala ring -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="url(#gold)" stroke-width="1" stroke-opacity="0.3"/>
+  <circle cx="256" cy="256" r="160" fill="none" stroke="url(#gold)" stroke-width="1" stroke-opacity="0.2"/>
+  <circle cx="256" cy="256" r="120" fill="none" stroke="url(#gold)" stroke-width="1" stroke-opacity="0.15"/>
+  <circle cx="256" cy="256" r="80" fill="none" stroke="url(#gold)" stroke-width="1" stroke-opacity="0.1"/>
+  <circle cx="256" cy="256" r="40" fill="none" stroke="url(#gold)" stroke-width="1" stroke-opacity="0.05"/>
+  
+  <!-- Central yantra - simplified Sri Yantra -->
+  <g fill="none" stroke="url(#gold)" stroke-width="2">
+    <!-- Outer triangles pointing up -->
+    <path d="M256,80 L116,260 L396,260 Z" stroke-opacity="0.4"/>
+    <path d="M256,100 L146,260 L366,260 Z" stroke-opacity="0.3"/>
+    <path d="M256,120 L176,260 L336,260 Z" stroke-opacity="0.2"/>
+    
+    <!-- Outer triangles pointing down -->
+    <path d="M256,432 L116,252 L396,252 Z" stroke-opacity="0.4"/>
+    <path d="M256,412 L146,252 L366,252 Z" stroke-opacity="0.3"/>
+    <path d="M256,392 L176,252 L336,252 Z" stroke-opacity="0.2"/>
+    
+    <!-- Center bindu -->
+    <circle cx="256" cy="256" r="8" fill="url(#gold)" stroke="none"/>
+    <circle cx="256" cy="256" r="4" fill="#050301" stroke="none"/>
+  </g>
+  
+  <!-- Nakshatra stars - 27 small stars around the circle -->
+  <g fill="url(#gold)">
+    <circle cx="256" cy="60" r="4"/>
+    <circle cx="310" cy="78" r="3"/>
+    <circle cx="360" cy="116" r="3"/>
+    <circle cx="400" cy="170" r="3"/>
+    <circle cx="424" cy="232" r="3"/>
+    <circle cx="432" cy="296" r="3"/>
+    <circle cx="424" cy="360" r="3"/>
+    <circle cx="400" cy="422" r="3"/>
+    <circle cx="360" cy="476" r="3"/>
+    <circle cx="310" cy="514" r="3"/>
+    <circle cx="256" cy="532" r="4"/>
+    <circle cx="202" cy="514" r="3"/>
+    <circle cx="152" cy="476" r="3"/>
+    <circle cx="112" cy="422" r="3"/>
+    <circle cx="88" cy="360" r="3"/>
+    <circle cx="80" cy="296" r="3"/>
+    <circle cx="88" cy="232" r="3"/>
+    <circle cx="112" cy="170" r="3"/>
+    <circle cx="152" cy="116" r="3"/>
+    <circle cx="202" cy="78" r="3"/>
+    
+    <!-- Inner ring of 8 stars -->
+    <circle cx="256" cy="130" r="2.5"/>
+    <circle cx="320" cy="170" r="2.5"/>
+    <circle cx="360" cy="256" r="2.5"/>
+    <circle cx="320" cy="342" r="2.5"/>
+    <circle cx="256" cy="382" r="2.5"/>
+    <circle cx="192" cy="342" r="2.5"/>
+    <circle cx="152" cy="256" r="2.5"/>
+    <circle cx="192" cy="170" r="2.5"/>
+  </g>
+  
+  <!-- Sanskrit "Om" symbol at bottom -->
+  <text x="256" y="480" font-family="serif" font-size="24" fill="url(#gold)" text-anchor="middle" opacity="0.6">ॐ</text>
+</svg>

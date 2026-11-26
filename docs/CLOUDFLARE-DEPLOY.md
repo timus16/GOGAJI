@@ -15,8 +15,8 @@ changes.
 
 ## Plan requirement: Workers Paid
 
-The Worker does server-side rendering **and** waits on AI providers (Gemini,
-NVIDIA flux.1-dev, OpenRouter, Baidu). Workers **Free** caps a request at
+The Worker does server-side rendering **and** waits on AI providers (Gemini and
+NVIDIA flux.1-dev). Workers **Free** caps a request at
 **10 ms of CPU**. SSR alone can exceed that, and `limits.cpu_ms` cannot be
 raised above 10 ms on Free — the setting is ignored there.
 
@@ -36,7 +36,6 @@ Set each one interactively (paste the value when prompted):
 ```sh
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put NVIDIA_API_KEY
-npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put BAIDU_API_KEY
 ```
 

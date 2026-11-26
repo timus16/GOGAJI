@@ -209,7 +209,7 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 55;
-  background: radial-gradient(ellipse at 50% 45%, transparent 40%, rgba(4, 6, 11, 0.55) 85%, rgba(4, 6, 11, 0.9) 100%);
+  background-image: radial-gradient(ellipse at 50% 45%, transparent 40%, rgba(4, 6, 11, 0.55) 85%, rgba(4, 6, 11, 0.9) 100%);
 }
 
 /* ---------- Letterbox Bars (agon-agent) ---------- */

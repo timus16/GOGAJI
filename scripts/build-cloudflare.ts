@@ -8,8 +8,8 @@ process.chdir(root);
 const OUT_DIR = "dist/cloudflare-worker";
 const SSR_DIR = "dist/server";
 
-console.log("[1/2] bun run build  (vite: client + SSR)");
-await $`bun run build`;
+console.log("[1/2] vite build  (client + SSR)");
+await $`bunx vite build`;
 
 // Post-process server.js to move astro_exports before router dynamic import
 const serverJsPath = resolve(SSR_DIR, "server.js");
